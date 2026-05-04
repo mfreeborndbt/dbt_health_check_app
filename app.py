@@ -67,7 +67,19 @@ def index():
 @app.route("/setup")
 def setup():
     creds = load_credentials()
-    return render_template("setup.html", creds=creds)
+    # Load project tags from cache if available
+    all_tags = []
+    if creds:
+        client = get_client_from_config()
+        if client:
+            from data_quality import _fetch_high_impact_signals
+            try:
+                hi_data = _fetch_high_impact_signals(client)
+                all_tags = hi_data.get("all_tags", [])
+            except Exception:
+                pass
+    selected_tags = (creds or {}).get("high_impact_tags", [])
+    return render_template("setup.html", creds=creds, all_tags=all_tags, selected_tags=selected_tags)
 
 
 @app.route("/setup/save", methods=["POST"])
@@ -110,6 +122,29 @@ def setup_save():
         flash(f"Connection failed: {e}", "error")
         save_credentials(data)
         return redirect(url_for("setup"))
+
+
+@app.route("/setup/save-tags", methods=["POST"])
+def setup_save_tags():
+    creds = load_credentials()
+    if creds is None:
+        flash("Configure your connection first.", "error")
+        return redirect(url_for("setup"))
+    tags = request.form.getlist("high_impact_tags")
+    creds["high_impact_tags"] = tags
+    save_credentials(creds)
+    # Invalidate the summary cache so tags take effect
+    cache_db.close()
+    cache_dir = os.path.join(os.path.dirname(__file__), ".cache")
+    # Only clear the summary cache key, not all caches
+    from data_quality import _summary_db_key, _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
+    from cache_db import cache_delete
+    summary_key = _summary_db_key(get_client_from_config())
+    cache_delete(summary_key)
+    with _SUMMARY_CACHE_LOCK:
+        _SUMMARY_CACHE.pop(summary_key, None)
+    flash(f"High-impact tags saved ({len(tags)} selected).", "success")
+    return redirect(url_for("setup"))
 
 
 @app.route("/setup/clear")

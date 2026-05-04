@@ -157,6 +157,32 @@
         </div>
       </form>
     </div>
+    {% if creds and all_tags %}
+    <div class="form-card" style="margin-top:1.25rem;">
+      <form action="/setup/save-tags" method="POST">
+        <div class="form-group" style="margin-bottom:0.75rem;">
+          <label>High-Impact Tags</label>
+          <div class="hint" style="margin-bottom:0.75rem;">Select tags that indicate a model is high-impact. Models with these tags will show a "High Impact Tag" badge.</div>
+          <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+            <button type="button" class="btn" style="font-size:0.75rem;padding:0.35rem 0.75rem;" onclick="document.querySelectorAll('.tag-cb').forEach(function(c){c.checked=true})">Select All</button>
+            <button type="button" class="btn btn-danger" style="font-size:0.75rem;padding:0.35rem 0.75rem;" onclick="document.querySelectorAll('.tag-cb').forEach(function(c){c.checked=false})">Clear All</button>
+          </div>
+          <div style="max-height:320px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.25rem 1rem;">
+            {% for tag in all_tags %}
+            <label style="display:flex;align-items:center;gap:0.5rem;padding:0.3rem 0.25rem;font-size:0.85rem;cursor:pointer;border-radius:4px;text-transform:none;letter-spacing:normal;color:var(--text);font-weight:400;" onmouseover="this.style.background='rgba(255,255,255,0.03)'" onmouseout="this.style.background='none'">
+              <input type="checkbox" class="tag-cb" name="high_impact_tags" value="{{ tag }}" {% if tag in selected_tags %}checked{% endif %} style="accent-color:var(--accent);flex-shrink:0;">
+              <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tag }}</span>
+            </label>
+            {% endfor %}
+          </div>
+        </div>
+        <div class="actions" style="margin-top:1rem;">
+          <button type="submit" class="btn" style="font-size:0.85rem;">Save Tags</button>
+          <span style="font-size:0.78rem;color:var(--text-muted);">{{ selected_tags | length }} tag{{ 's' if selected_tags | length != 1 else '' }} currently selected</span>
+        </div>
+      </form>
+    </div>
+    {% endif %}
   </div>
 
 <script>

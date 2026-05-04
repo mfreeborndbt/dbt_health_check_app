@@ -53,8 +53,8 @@
     table { width:100%;border-collapse:collapse; }
     th { text-align:left;font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);padding:0.5rem 0.75rem;border-bottom:1px solid var(--border); }
     th.sortable { cursor:pointer;user-select:none; } th.sortable:hover { color:var(--text); }
-    th.sortable::after { content:'';display:inline-block;margin-left:0.3rem;opacity:0.3; }
-    th.sort-asc::after { content:' \\25B2';opacity:1; } th.sort-desc::after { content:' \\25BC';opacity:1; }
+    th.sortable::after { content:' ⇅';display:inline-block;margin-left:0.3rem;opacity:0.3; }
+    th.sort-asc::after { content:' ▲';opacity:1; } th.sort-desc::after { content:' ▼';opacity:1; }
     td { padding:0.6rem 0.75rem;font-size:0.85rem;border-bottom:1px solid var(--border);vertical-align:top; }
     tr:last-child td { border-bottom:none; } tr:hover td { background:rgba(255,255,255,0.02); }
     .model-name { font-weight:600; } .clickable-row { cursor:pointer; } .clickable-row.selected td { background:rgba(96,165,250,0.08); }
@@ -172,13 +172,13 @@
       <table id="modelTable">
         <thead><tr>
           <th class="sortable" data-col="0" data-type="text">Model</th>
-          <th>Issue Type</th>
+          <th class="sortable" data-col="1" data-type="text">Issue Type</th>
           <th class="sortable" data-col="2" data-type="num">Model Errors</th>
           <th class="sortable" data-col="3" data-type="num">Failed Tests</th>
-          <th class="sortable" data-col="4" data-type="num">Executions (30d)</th>
-          <th class="sortable" data-col="5" data-type="num">Dwnstrm Executions</th>
+          <th class="sortable" data-col="4" data-type="num">Test Failures</th>
+          <th class="sortable" data-col="5" data-type="num">Query Count</th>
           <th class="sortable" data-col="6" data-type="num">High Impact</th>
-          <th class="sortable" data-col="7" data-type="num">High Impact Dwnstrm</th>
+          <th class="sortable" data-col="7" data-type="num">HI Dwnstrm</th>
           <th class="sortable" data-col="8" data-type="num">Upstream</th>
           <th class="sortable" data-col="9" data-type="num">Downstream</th>
           <th></th>
@@ -189,11 +189,11 @@
             <td><div class="model-name">{{ model.name }}</div><div style="font-size:0.7rem;color:var(--text-muted);">{{ model.unique_id }}</div></td>
             <td>{% if model.has_model_errors %}<span class="badge badge-error">Execution Error</span> {% endif %}{% if model.has_test_failures %}<span class="badge badge-test">Test Failure</span>{% endif %}</td>
             <td data-val="{{ model.error_count }}">{% if model.error_count > 0 %}<span style="color:var(--red);font-weight:600;">{{ model.error_count }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
-            <td data-val="{{ model.test_failure_count }}">{% if model.test_failure_count > 0 %}<span style="color:var(--orange);font-weight:600;">{{ model.test_failure_count }} <span style="font-weight:400;color:var(--text-muted);font-size:0.75rem;">({{ model.test_occurrence_count }}x)</span></span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
-            <td data-val="{{ model.query_count }}">{% if model.query_count > 0 %}<span style="font-weight:600;">{{ model.query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
-            <td data-val="{{ model.downstream_query_count }}">{% if model.downstream_query_count > 0 %}<span style="font-weight:600;">{{ model.downstream_query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
-            <td data-val="{% if model.is_high_impact %}1{% else %}0{% endif %}">{% if model.is_high_impact %}<span class="badge" style="background:rgba(248,113,113,0.15);color:var(--red);">High Impact</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
-            <td data-val="{% if model.is_high_impact_downstream %}1{% else %}0{% endif %}">{% if model.is_high_impact_downstream %}<span class="badge" style="background:rgba(251,191,36,0.15);color:var(--orange);">High Impact</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.test_failure_count }}">{% if model.test_failure_count > 0 %}<span style="color:var(--orange);font-weight:600;">{{ model.test_failure_count }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.test_occurrence_count }}">{% if model.test_occurrence_count > 0 %}<span style="color:var(--orange);font-weight:600;">{{ model.test_occurrence_count }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.query_count }}">{% if model.query_count > 0 %}<span style="font-weight:600;">{{ "{:,}".format(model.query_count) }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+            <td data-val="{{ model.high_impact_reasons | length }}">{% if model.high_impact_reasons %}{% for reason in model.high_impact_reasons %}<span class="badge" style="background:rgba(96,165,250,0.15);color:var(--blue);margin-right:0.25rem;margin-bottom:0.15rem;">{{ reason }}</span>{% endfor %}{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.hi_downstream_count }}">{% if model.hi_downstream_count > 0 %}<span style="color:var(--orange);font-weight:600;">{{ model.hi_downstream_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
             <td data-val="{{ model.upstream_count }}">{% if model.upstream_count > 0 %}<span style="color:var(--accent);">{{ model.upstream_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
             <td data-val="{{ model.downstream_count }}">{% if model.downstream_count > 0 %}<span style="color:var(--blue);">{{ model.downstream_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
             <td>{% if model.has_model_errors or model.has_test_failures %}<button class="toggle-btn" onclick="toggleDetails(this)">Show details</button>{% endif %}</td>
@@ -359,52 +359,50 @@ function clearAllFilters() {
 }
 
 // --- Sortable tables ---
-document.querySelectorAll('th.sortable').forEach(function(th) {
-  th.addEventListener('click', function(e) {
-    e.stopPropagation();
-    var table = th.closest('table'), tbody = table.querySelector('tbody');
-    var col = parseInt(th.getAttribute('data-col')), type = th.getAttribute('data-type');
-    var asc = !th.classList.contains('sort-asc');
-    // Clear sort indicators on sibling headers
-    th.closest('tr').querySelectorAll('th').forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
-    th.classList.add(asc ? 'sort-asc' : 'sort-desc');
-    // Collect rows (skip detail rows)
-    var rows = [];
-    tbody.querySelectorAll('tr').forEach(function(row) {
-      if (row.classList.contains('detail-row')) return;
-      rows.push(row);
-    });
-    rows.sort(function(a, b) {
-      var aVal, bVal;
-      if (type === 'num') {
-        var aCell = a.querySelectorAll('td')[col], bCell = b.querySelectorAll('td')[col];
-        aVal = parseFloat(aCell.getAttribute('data-val') || aCell.textContent.replace(/[^0-9.\-]/g, '')) || 0;
-        bVal = parseFloat(bCell.getAttribute('data-val') || bCell.textContent.replace(/[^0-9.\-]/g, '')) || 0;
-      } else {
-        aVal = a.querySelectorAll('td')[col].textContent.trim().toLowerCase();
-        bVal = b.querySelectorAll('td')[col].textContent.trim().toLowerCase();
-      }
-      if (aVal < bVal) return asc ? -1 : 1;
-      if (aVal > bVal) return asc ? 1 : -1;
-      return 0;
-    });
-    // Re-insert rows (with their detail rows)
-    rows.forEach(function(row) {
-      tbody.appendChild(row);
-      var next = row.nextElementSibling;
-      // The detail row might not be adjacent anymore, find it
-      var detailRow = null;
-      var allRows = Array.from(tbody.querySelectorAll('tr.detail-row'));
-      // For model table, detail rows follow their parent
-      if (row.classList.contains('model-row')) {
-        // Find detail row that was originally after this row
-        var nextSib = row.nextElementSibling;
-        if (nextSib && nextSib.classList.contains('detail-row')) {
-          tbody.appendChild(nextSib);
-        }
-      }
-    });
+// Pre-index detail rows by model-row for correct re-association after sort
+var detailMap = new Map();
+document.querySelectorAll('tr.model-row').forEach(function(row) {
+  var next = row.nextElementSibling;
+  if (next && next.classList.contains('detail-row')) detailMap.set(row, next);
+});
+
+function sortTable(th) {
+  var table = th.closest('table');
+  var tbody = table.querySelector('tbody');
+  var col = parseInt(th.getAttribute('data-col'));
+  var type = th.getAttribute('data-type');
+  var asc = !th.classList.contains('sort-asc');
+  th.closest('tr').querySelectorAll('th').forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+  th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+  // Collect only primary rows (skip detail/err rows)
+  var rows = Array.from(tbody.children).filter(function(row) {
+    return !row.classList.contains('detail-row') && !row.classList.contains('err-row');
   });
+  rows.sort(function(a, b) {
+    var aCells = a.querySelectorAll('td'), bCells = b.querySelectorAll('td');
+    if (!aCells[col] || !bCells[col]) return 0;
+    var aVal, bVal;
+    if (type === 'num') {
+      aVal = parseFloat(aCells[col].getAttribute('data-val') || aCells[col].textContent.replace(/[^0-9.\-]/g, '')) || 0;
+      bVal = parseFloat(bCells[col].getAttribute('data-val') || bCells[col].textContent.replace(/[^0-9.\-]/g, '')) || 0;
+    } else {
+      aVal = aCells[col].textContent.trim().toLowerCase();
+      bVal = bCells[col].textContent.trim().toLowerCase();
+    }
+    if (aVal < bVal) return asc ? -1 : 1;
+    if (aVal > bVal) return asc ? 1 : -1;
+    return 0;
+  });
+  // Re-append in sorted order — appendChild moves existing nodes
+  rows.forEach(function(row) {
+    tbody.appendChild(row);
+    var detail = detailMap.get(row);
+    if (detail) tbody.appendChild(detail);
+  });
+}
+
+document.querySelectorAll('th.sortable').forEach(function(th) {
+  th.onclick = function(e) { e.stopPropagation(); sortTable(th); };
 });
 </script>
 </body>
