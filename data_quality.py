@@ -18,7 +18,7 @@ _SUMMARY_CACHE_LOCK = threading.Lock()
 
 
 def _summary_db_key(client):
-    return f"dq_summary_v20:{client.account_id}:{client.project_id}:{client.environment_id}"
+    return f"dq_summary_v21:{client.account_id}:{client.project_id}:{client.environment_id}"
 
 
 def _summary_cache_get(client):
@@ -516,22 +516,22 @@ def _fetch_test_compiled_code(client: DbtClient):
 def _fetch_high_impact_signals(client: DbtClient):
     """Fetch semantic model refs, exposure refs, and public models.
     Returns dict: {uid: set of reason tags}."""
-    key = _cache_key("hi_signals_v6", client.account_id, client.environment_id)
+    key = _cache_key("hi_signals_v7", client.account_id, client.environment_id)
     cached = _cache_get(key)
     if cached is not None and isinstance(cached, dict) and "signals" in cached:
         return cached
 
     signals = defaultdict(set)  # uid -> set of reason strings
 
-    # --- Semantic models ---
+    # --- Semantic models (in definition state, not applied) ---
     print(f"[{client.name}] Fetching semantic models...")
     query_sm = """
     query ($environmentId: BigInt!, $first: Int!, $after: String) {
       environment(id: $environmentId) {
-        applied {
+        definition {
           semanticModels(first: $first, after: $after) {
             pageInfo { hasNextPage endCursor }
-            edges { node { uniqueId dependsOn } }
+            edges { node { uniqueId parents { uniqueId resourceType } } }
           }
         }
       }
@@ -547,11 +547,11 @@ def _fetch_high_impact_signals(client: DbtClient):
         except Exception as e:
             print(f"[{client.name}] Could not fetch semantic models: {e}")
             break
-        sm_data = data["environment"]["applied"]["semanticModels"]
+        sm_data = data["environment"]["definition"]["semanticModels"]
         for edge in sm_data["edges"]:
-            for dep in (edge["node"].get("dependsOn") or []):
-                if dep.startswith("model."):
-                    signals[dep].add("Semantic Model")
+            for p in (edge["node"].get("parents") or []):
+                if p.get("resourceType") == "model":
+                    signals[p["uniqueId"]].add("Semantic Model")
         if not sm_data["pageInfo"]["hasNextPage"]:
             break
         cursor = sm_data["pageInfo"]["endCursor"]

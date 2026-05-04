@@ -1,0 +1,308 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Project Health — dbt Health Check</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2218%22 fill=%22%2334d399%22/><text y=%2272%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2258%22 font-family=%22system-ui%22 font-weight=%22700%22 fill=%22white%22>H</text></svg>">
+  <style>
+    :root { --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--text-muted:#8b8fa3;--accent:#34d399;--green:#34d399;--red:#f87171;--orange:#fbbf24;--blue:#60a5fa; }
+    * { margin:0;padding:0;box-sizing:border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;background:var(--bg);color:var(--text);padding:2rem; }
+    a { color:var(--accent);text-decoration:none; } a:hover { text-decoration:underline; }
+    .tab-nav { display:flex;align-items:center;border-bottom:1px solid var(--border);margin-bottom:1.5rem; }
+    .tab { padding:0.6rem 1.25rem;font-size:0.85rem;color:var(--text-muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px; }
+    .tab:hover { color:var(--text);text-decoration:none; } .tab.active { color:var(--accent);border-bottom-color:var(--accent);font-weight:600; }
+    .tab-spacer { flex:1; } .tab-sep { width:1px;height:1.1rem;background:var(--border);margin:0 0.25rem;align-self:center; }
+    .tab-link { padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-muted);text-decoration:none; } .tab-link:hover { color:var(--accent);text-decoration:none; }
+    header h1 { font-size:1.5rem;font-weight:600; } header h1 span { color:var(--accent); }
+    .subtitle { color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem; }
+    .summary-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1.5rem 0; }
+    .summary-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.25rem; }
+    .summary-card .label { font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.5rem; }
+    .summary-card .value { font-size:1.8rem;font-weight:700; } .summary-card .detail { font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem; }
+    .value-green { color:var(--green); } .value-red { color:var(--red); } .value-orange { color:var(--orange); }
+    .table-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem; }
+    .table-card h2 { font-size:0.95rem;font-weight:600;margin-bottom:0.5rem; }
+    table { width:100%;border-collapse:collapse; }
+    th { text-align:left;font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);padding:0.5rem 0.4rem;border-bottom:1px solid var(--border);white-space:nowrap; }
+    th.sortable { cursor:pointer;user-select:none; } th.sortable:hover { color:var(--text); }
+    th.sortable::after { content:' ⇅';display:inline-block;margin-left:0.15rem;opacity:0.3;font-size:0.6rem; }
+    th.sort-asc::after { content:' ▲';opacity:1; } th.sort-desc::after { content:' ▼';opacity:1; }
+    td { padding:0.4rem 0.4rem;font-size:0.78rem;border-bottom:1px solid var(--border);vertical-align:top; }
+    tr:last-child td { border-bottom:none; } tr:hover td { background:rgba(255,255,255,0.02); }
+    .model-name { font-weight:600;font-size:0.8rem; }
+    .badge { display:inline-block;padding:0.1rem 0.35rem;border-radius:3px;font-size:0.65rem;font-weight:600; }
+    .badge-pass { background:rgba(52,211,153,0.15);color:var(--green); }
+    .badge-fail { background:rgba(248,113,113,0.15);color:var(--red); }
+    .badge-hi { background:rgba(96,165,250,0.15);color:var(--blue);margin-right:0.15rem;margin-bottom:0.1rem; }
+    .badge-na { background:rgba(139,143,163,0.08);color:var(--text-muted); }
+    .badge-yes { background:rgba(52,211,153,0.15);color:var(--green); }
+    .badge-no { color:var(--text-muted); }
+    .muted-num { color:var(--text-muted); }
+    .section-tabs { display:flex;gap:0;margin-bottom:1rem;border:1px solid var(--border);border-radius:8px;overflow:hidden; }
+    .section-tab { flex:1;padding:0.55rem 1rem;text-align:center;font-size:0.82rem;font-weight:500;color:var(--text-muted);background:var(--surface);border:none;border-right:1px solid var(--border);cursor:pointer;font-family:inherit;transition:background 0.15s,color 0.15s; }
+    .section-tab:last-child { border-right:none; } .section-tab:hover { color:var(--text);background:#1e2130; }
+    .section-tab.active { color:var(--text);background:var(--bg);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent); }
+    .filter-bar { display:flex;flex-wrap:wrap;gap:0.35rem;margin-bottom:0.75rem;align-items:center; }
+    .filter-bar .flabel { font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted); }
+    .fbtn { background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:0.68rem;padding:0.18rem 0.4rem;cursor:pointer;font-family:inherit; }
+    .fbtn:hover { color:var(--text);border-color:var(--text-muted); }
+    .fbtn.active { background:rgba(96,165,250,0.15);border-color:var(--blue);color:var(--blue); }
+    .fsep { width:1px;height:0.9rem;background:var(--border);margin:0 0.15rem; }
+  </style>
+</head>
+<body>
+  <nav class="tab-nav">
+    <a href="/data-quality" class="tab">Data Quality</a>
+    <a href="/project-health" class="tab active">Project Health</a>
+    <span class="tab-spacer"></span>
+    <span class="tab-sep"></span>
+    <a href="/config" class="tab-link">High Impact Config</a>
+    <span class="tab-sep"></span>
+    <a href="/setup" class="tab-link">&#9881; Settings</a>
+  </nav>
+  <header>
+    <h1><span>&#9642;</span> Project Health</h1>
+    <div class="subtitle">Model best practices evaluation &mdash; {{ creds.name or creds.account_prefix }}</div>
+  </header>
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="label">Total Models</div><div class="value">{{ summary.stats.total_models }}</div><div class="detail">Across all packages</div></div>
+    <div class="summary-card"><div class="label">Documentation</div><div class="value {% if summary.stats.models_with_description / summary.stats.total_models < 0.5 %}value-red{% elif summary.stats.models_with_description / summary.stats.total_models < 0.8 %}value-orange{% else %}value-green{% endif %}">{{ (summary.stats.models_with_description / summary.stats.total_models * 100) | round | int }}%</div><div class="detail">{{ summary.stats.models_with_description }}/{{ summary.stats.total_models }} documented</div></div>
+    <div class="summary-card"><div class="label">Test Coverage</div><div class="value {% if summary.stats.models_with_tests / summary.stats.total_models < 0.5 %}value-red{% elif summary.stats.models_with_tests / summary.stats.total_models < 0.8 %}value-orange{% else %}value-green{% endif %}">{{ (summary.stats.models_with_tests / summary.stats.total_models * 100) | round | int }}%</div><div class="detail">{{ summary.stats.models_with_tests }}/{{ summary.stats.total_models }} with tests</div></div>
+    <div class="summary-card"><div class="label">High Impact Models</div><div class="value" style="color:var(--blue);">{{ summary.stats.high_impact_count }}</div><div class="detail">Flagged as high impact</div></div>
+  </div>
+
+  <div class="section-tabs">
+    <button class="section-tab active" onclick="switchCategory('modeling')">Modeling</button>
+    <button class="section-tab" onclick="switchCategory('testing')">Testing</button>
+    <button class="section-tab" onclick="switchCategory('documentation')">Documentation</button>
+    <button class="section-tab" onclick="switchCategory('governance')">Governance</button>
+  </div>
+
+  <div class="table-card">
+    <div class="filter-bar" id="filterBar">
+      <span class="flabel">Filters:</span>
+      <button class="fbtn" data-f="hi_yes" onclick="tf('hi_yes')">High Impact</button>
+      <button class="fbtn" data-f="hi_no" onclick="tf('hi_no')">Not High Impact</button>
+      <span class="fsep"></span>
+      <button class="fbtn" data-f="has_time" onclick="tf('has_time')">Has Run Time</button>
+      <button class="fbtn" data-f="slow" onclick="tf('slow')">Slow (p80 &gt; 60s)</button>
+      <span class="fsep"></span>
+      <span class="flabel" id="ruleFilterLabel">Rule Filters:</span>
+      <span id="ruleFilterBtns"></span>
+      <span class="fsep"></span>
+      <button class="fbtn" onclick="clearF()">Clear All</button>
+    </div>
+
+    <div style="max-height:75vh;overflow-y:auto;">
+    <table id="phTable">
+      <thead><tr>
+        <th class="sortable" data-col="0" data-type="text">Model</th>
+        <th class="sortable" data-col="1" data-type="text">Folder</th>
+        <th class="sortable" data-col="2" data-type="text">Subfolder</th>
+        <th class="sortable" data-col="3" data-type="text">Sub-subfolder</th>
+        <th class="sortable" data-col="4" data-type="text">Layer</th>
+        <th class="sortable" data-col="5" data-type="num">Median</th>
+        <th class="sortable" data-col="6" data-type="num">P80</th>
+        <th class="sortable" data-col="7" data-type="num">Max</th>
+        <th class="sortable" data-col="8" data-type="num">High Impact</th>
+        <th class="sortable" data-col="9" data-type="text">Impact Reasons</th>
+      </tr></thead>
+      <tbody>
+        {% for m in summary.models %}
+        <tr class="ph-row"
+            data-hi="{{ 1 if m.is_high_impact else 0 }}"
+            data-median="{{ m.performance.median if m.performance else 0 }}"
+            data-p80="{{ m.performance.p80 if m.performance else 0 }}"
+            data-modeling='{{ m.modeling | tojson }}'
+            data-testing='{{ m.testing | tojson }}'
+            data-documentation='{{ m.documentation | tojson }}'
+            data-governance='{{ m.governance | tojson }}'>
+          <td><div class="model-name">{{ m.name }}</div></td>
+          <td style="font-size:0.72rem;">{{ m.folder or '—' }}</td>
+          <td style="font-size:0.72rem;color:var(--text-muted);">{{ m.subfolder or '—' }}</td>
+          <td style="font-size:0.72rem;color:var(--text-muted);">{{ m.subsubfolder or '—' }}</td>
+          <td><span class="badge badge-na">{{ m.layer }}</span></td>
+          <td data-val="{{ m.performance.median if m.performance else -1 }}">{% if m.performance %}<span>{{ fmtTime(m.performance.median) }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+          <td data-val="{{ m.performance.p80 if m.performance else -1 }}">{% if m.performance %}<span{% if m.performance.p80 > 60 %} style="color:var(--orange);"{% endif %}>{{ fmtTime(m.performance.p80) }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+          <td data-val="{{ m.performance.max if m.performance else -1 }}">{% if m.performance %}<span{% if m.performance.max > 120 %} style="color:var(--red);font-weight:600;"{% elif m.performance.max > 60 %} style="color:var(--orange);"{% endif %}>{{ fmtTime(m.performance.max) }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+          <td data-val="{{ 1 if m.is_high_impact else 0 }}">{% if m.is_high_impact %}<span class="badge badge-yes">Yes</span>{% else %}<span class="badge-no">No</span>{% endif %}</td>
+          <td>{% if m.high_impact_reasons %}{% for r in m.high_impact_reasons %}<span class="badge badge-hi">{{ r }}</span>{% endfor %}{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+  </div>
+
+<script>
+// Time formatter: seconds -> human readable
+function fmtTimeSec(s) {
+  if (s < 0) return '—';
+  if (s < 60) return s.toFixed(1) + 's';
+  if (s < 3600) return Math.floor(s/60) + 'm ' + Math.round(s%60) + 's';
+  var h = Math.floor(s/3600); var m = Math.floor((s%3600)/60);
+  return h + 'h ' + m + 'm';
+}
+
+var currentCategory = 'modeling';
+var phFilters = new Set();
+
+var ruleLabels = {
+  modeling: {
+    staging_on_staging: 'No Stg→Stg',
+    staging_on_downstream: 'No Stg→Marts',
+    marts_on_source: 'No Marts→Source',
+    direct_join_to_source: 'No Direct Src Join',
+    root_model: 'Has Parents',
+    model_fanout: 'Fanout ≤3',
+    too_many_joins: 'Joins ≤7',
+    multiple_sources: 'Single Source'
+  },
+  testing: { has_test: 'Has Tests', primary_key_test: 'PK Test' },
+  documentation: { has_description: 'Has Description' },
+  governance: { public_has_contract: 'Public→Contract', public_has_description: 'Public→Documented' }
+};
+
+function switchCategory(cat) {
+  currentCategory = cat;
+  document.querySelectorAll('.section-tab').forEach(function(b) { b.classList.remove('active'); });
+  event.currentTarget.classList.add('active');
+  renderRuleColumns();
+  buildRuleFilters();
+  clearF();
+}
+
+function renderRuleColumns() {
+  var labels = ruleLabels[currentCategory] || {};
+  var keys = Object.keys(labels);
+  var thead = document.querySelector('#phTable thead tr');
+  thead.querySelectorAll('.rule-hdr').forEach(function(th) { th.remove(); });
+  keys.forEach(function(key, i) {
+    var th = document.createElement('th');
+    th.className = 'rule-hdr sortable';
+    th.setAttribute('data-col', 10 + i);
+    th.setAttribute('data-type', 'num');
+    th.setAttribute('data-rule', key);
+    th.textContent = labels[key];
+    th.onclick = function(e) { e.stopPropagation(); sortPH(th); };
+    thead.appendChild(th);
+  });
+
+  document.querySelectorAll('.ph-row').forEach(function(row) {
+    row.querySelectorAll('.rule-cell-dyn').forEach(function(td) { td.remove(); });
+    var rules = JSON.parse(row.getAttribute('data-' + currentCategory) || '{}');
+    keys.forEach(function(key) {
+      var td = document.createElement('td');
+      td.className = 'rule-cell-dyn';
+      var val = rules[key];
+      if (val === undefined || val === null) {
+        td.innerHTML = '<span class="badge badge-na">N/A</span>';
+        td.setAttribute('data-val', '-1');
+      } else if (val) {
+        td.innerHTML = '<span class="badge badge-pass">Pass</span>';
+        td.setAttribute('data-val', '1');
+      } else {
+        td.innerHTML = '<span class="badge badge-fail">Fail</span>';
+        td.setAttribute('data-val', '0');
+      }
+      row.appendChild(td);
+    });
+  });
+}
+
+function buildRuleFilters() {
+  var labels = ruleLabels[currentCategory] || {};
+  var container = document.getElementById('ruleFilterBtns');
+  container.innerHTML = '';
+  Object.keys(labels).forEach(function(key) {
+    var btn = document.createElement('button');
+    btn.className = 'fbtn';
+    btn.setAttribute('data-f', 'rule_pass_' + key);
+    btn.textContent = labels[key] + ' ✓';
+    btn.onclick = function() { tf('rule_pass_' + key); };
+    container.appendChild(btn);
+    var btn2 = document.createElement('button');
+    btn2.className = 'fbtn';
+    btn2.setAttribute('data-f', 'rule_fail_' + key);
+    btn2.textContent = labels[key] + ' ✗';
+    btn2.onclick = function() { tf('rule_fail_' + key); };
+    container.appendChild(btn2);
+  });
+}
+
+function tf(f) {
+  var btn = document.querySelector('.fbtn[data-f="'+f+'"]');
+  if (!btn) return;
+  if (phFilters.has(f)) { phFilters.delete(f); btn.classList.remove('active'); }
+  else { phFilters.add(f); btn.classList.add('active'); }
+  applyF();
+}
+function clearF() {
+  phFilters.clear();
+  document.querySelectorAll('.fbtn[data-f]').forEach(function(b) { b.classList.remove('active'); });
+  applyF();
+}
+function applyF() {
+  var cat = currentCategory;
+  document.querySelectorAll('.ph-row').forEach(function(row) {
+    var show = true;
+    if (phFilters.has('hi_yes') && row.getAttribute('data-hi') !== '1') show = false;
+    if (phFilters.has('hi_no') && row.getAttribute('data-hi') !== '0') show = false;
+    if (phFilters.has('has_time') && parseFloat(row.getAttribute('data-median')) <= 0) show = false;
+    if (phFilters.has('slow') && parseFloat(row.getAttribute('data-p80')) <= 60) show = false;
+
+    // Rule filters
+    if (show) {
+      var rules = JSON.parse(row.getAttribute('data-' + cat) || '{}');
+      phFilters.forEach(function(f) {
+        if (f.startsWith('rule_pass_')) {
+          var key = f.replace('rule_pass_', '');
+          if (rules[key] !== true) show = false;
+        } else if (f.startsWith('rule_fail_')) {
+          var key = f.replace('rule_fail_', '');
+          if (rules[key] !== false) show = false;
+        }
+      });
+    }
+    row.style.display = show ? '' : 'none';
+  });
+}
+
+function sortPH(th) {
+  var table = th.closest('table'), tbody = table.querySelector('tbody');
+  var col = parseInt(th.getAttribute('data-col')), type = th.getAttribute('data-type');
+  var asc = !th.classList.contains('sort-asc');
+  th.closest('tr').querySelectorAll('th').forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+  th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+  var rows = Array.from(tbody.children);
+  rows.sort(function(a, b) {
+    var aCells = a.querySelectorAll('td'), bCells = b.querySelectorAll('td');
+    if (!aCells[col] || !bCells[col]) return 0;
+    var aVal, bVal;
+    if (type === 'num') {
+      aVal = parseFloat(aCells[col].getAttribute('data-val') || aCells[col].textContent.replace(/[^0-9.\-]/g,'')) || 0;
+      bVal = parseFloat(bCells[col].getAttribute('data-val') || bCells[col].textContent.replace(/[^0-9.\-]/g,'')) || 0;
+    } else {
+      aVal = aCells[col].textContent.trim().toLowerCase();
+      bVal = bCells[col].textContent.trim().toLowerCase();
+    }
+    if (aVal < bVal) return asc ? -1 : 1;
+    if (aVal > bVal) return asc ? 1 : -1;
+    return 0;
+  });
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
+
+document.querySelectorAll('#phTable th.sortable').forEach(function(th) {
+  th.onclick = function(e) { e.stopPropagation(); sortPH(th); };
+});
+
+// Initial render
+renderRuleColumns();
+buildRuleFilters();
+</script>
+</body>
+</html>
