@@ -1,0 +1,411 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Data Quality — dbt Health Check</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2218%22 fill=%22%2334d399%22/><text y=%2272%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2258%22 font-family=%22system-ui%22 font-weight=%22700%22 fill=%22white%22>H</text></svg>">
+  <style>
+    :root { --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--text-muted:#8b8fa3;--accent:#34d399;--green:#34d399;--red:#f87171;--orange:#fbbf24;--blue:#60a5fa; }
+    * { margin:0;padding:0;box-sizing:border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;background:var(--bg);color:var(--text);padding:2rem; }
+    a { color:var(--accent);text-decoration:none; } a:hover { text-decoration:underline; }
+    .tab-nav { display:flex;align-items:center;border-bottom:1px solid var(--border);margin-bottom:1.5rem; }
+    .tab { padding:0.6rem 1.25rem;font-size:0.85rem;color:var(--text-muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px; }
+    .tab:hover { color:var(--text);text-decoration:none; } .tab.active { color:var(--accent);border-bottom-color:var(--accent);font-weight:600; }
+    .tab-spacer { flex:1; } .tab-sep { width:1px;height:1.1rem;background:var(--border);margin:0 0.25rem;align-self:center; }
+    .tab-link { padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-muted);text-decoration:none; } .tab-link:hover { color:var(--accent);text-decoration:none; }
+    header h1 { font-size:1.5rem;font-weight:600; } header h1 span { color:var(--accent); }
+    .subtitle { color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem; }
+    .flash { padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;font-size:0.85rem;border:1px solid; }
+    .flash-success { background:rgba(52,211,153,0.1);border-color:rgba(52,211,153,0.3);color:var(--green); }
+    .flash-error { background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.3);color:var(--red); }
+    .summary-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1.5rem 0; }
+    .summary-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.25rem; }
+    .summary-card .label { font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.5rem; }
+    .summary-card .value { font-size:1.8rem;font-weight:700; } .summary-card .detail { font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem; }
+    .value-green { color:var(--green); } .value-red { color:var(--red); } .value-orange { color:var(--orange); }
+    .chart-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem; }
+    .chart-card h2 { font-size:0.95rem;font-weight:600;margin-bottom:0.25rem; }
+    .chart-filter-info { font-size:0.78rem;color:var(--accent);margin-bottom:0.75rem;display:none; }
+    .chart-filter-info .clear-filter { color:var(--text-muted);cursor:pointer;margin-left:0.5rem;border:1px solid var(--border);border-radius:4px;padding:0.1rem 0.4rem;font-size:0.7rem;background:none;font-family:inherit; }
+    .chart-filter-info .clear-filter:hover { color:var(--text);border-color:var(--text-muted); }
+    .chart-outer { display:flex; }
+    .chart-y-axis { display:flex;flex-direction:column;justify-content:space-between;margin-right:0.75rem;min-width:2rem;text-align:right; }
+    .chart-y-axis span { font-size:0.72rem;color:var(--text-muted); }
+    .chart-body { flex:1;display:flex;flex-direction:column; }
+    .chart-bars { height:320px;display:flex;align-items:flex-end;gap:3px; }
+    .chart-bar-wrapper { flex:1;display:flex;flex-direction:column;align-items:center;height:100%;justify-content:flex-end;cursor:pointer; }
+    .chart-bar-wrapper:hover { opacity:0.85; } .chart-bar-wrapper.selected .chart-bar { background:var(--blue); }
+    .chart-bar { width:100%;background:var(--red);border-radius:2px 2px 0 0;min-height:0;position:relative;transition:background 0.15s; }
+    .chart-bar.dimmed { opacity:0.25; } .chart-bar-zero { width:100%;height:2px;background:var(--border);border-radius:1px; }
+    .chart-tooltip { position:absolute;bottom:100%;left:50%;transform:translateX(-50%);background:#252836;border:1px solid var(--border);border-radius:4px;padding:0.4rem 0.65rem;font-size:0.75rem;white-space:nowrap;display:none;z-index:10;pointer-events:none;margin-bottom:4px;line-height:1.5; }
+    .chart-bar:hover .chart-tooltip { display:block; }
+    .chart-labels { display:flex;gap:3px;margin-top:0.5rem;border-top:1px solid var(--border);padding-top:0.5rem; }
+    .chart-labels .chart-label { flex:1;text-align:center;font-size:0.65rem;color:var(--text-muted);overflow:hidden;text-overflow:ellipsis;white-space:nowrap; }
+    .section-tabs { display:flex;gap:0;margin:1.5rem 0 0;border:1px solid var(--border);border-radius:8px;overflow:hidden; }
+    .section-tab { flex:1;padding:0.65rem 1.25rem;text-align:center;font-size:0.85rem;font-weight:500;color:var(--text-muted);background:var(--surface);border:none;border-right:1px solid var(--border);cursor:pointer;font-family:inherit;transition:background 0.15s,color 0.15s; }
+    .section-tab:last-child { border-right:none; } .section-tab:hover { color:var(--text);background:#1e2130; }
+    .section-tab.active { color:var(--text);background:var(--bg);font-weight:600;box-shadow:inset 0 -2px 0 var(--accent); }
+    .tab-panel { display:none;margin-top:1rem; } .tab-panel.active { display:block; }
+    .table-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem; }
+    .table-card h2 { font-size:0.95rem;font-weight:600;margin-bottom:1rem; }
+    table { width:100%;border-collapse:collapse; }
+    th { text-align:left;font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);padding:0.5rem 0.75rem;border-bottom:1px solid var(--border); }
+    th.sortable { cursor:pointer;user-select:none; } th.sortable:hover { color:var(--text); }
+    th.sortable::after { content:'';display:inline-block;margin-left:0.3rem;opacity:0.3; }
+    th.sort-asc::after { content:' \\25B2';opacity:1; } th.sort-desc::after { content:' \\25BC';opacity:1; }
+    td { padding:0.6rem 0.75rem;font-size:0.85rem;border-bottom:1px solid var(--border);vertical-align:top; }
+    tr:last-child td { border-bottom:none; } tr:hover td { background:rgba(255,255,255,0.02); }
+    .model-name { font-weight:600; } .clickable-row { cursor:pointer; } .clickable-row.selected td { background:rgba(96,165,250,0.08); }
+    .rate-bar-bg { width:120px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;display:inline-block;vertical-align:middle;margin-right:0.5rem; }
+    .rate-bar-fill { height:100%;border-radius:4px; } .rate-text { font-weight:600;font-size:0.85rem; }
+    .badge { display:inline-block;padding:0.15rem 0.5rem;border-radius:4px;font-size:0.7rem;font-weight:600; }
+    .badge-error { background:rgba(248,113,113,0.15);color:var(--red); } .badge-test { background:rgba(251,191,36,0.15);color:var(--orange); }
+    .toggle-btn { background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:0.72rem;padding:0.2rem 0.5rem;cursor:pointer;font-family:inherit; }
+    .toggle-btn:hover { color:var(--text);border-color:var(--text-muted); }
+    .detail-section { margin-top:0.5rem; }
+    .empty-state { text-align:center;padding:3rem 1rem;color:var(--text-muted); } .empty-state .icon { font-size:2rem;margin-bottom:0.5rem; } .empty-state p { font-size:0.9rem; }
+    .muted-num { color:var(--text-muted); }
+    .inner-th { font-size:0.68rem;padding:0.35rem 0.5rem; }
+    .inner-td { font-size:0.78rem;padding:0.35rem 0.5rem; }
+    .inner-td-detail { font-size:0.75rem;padding:0.35rem 0.5rem;white-space:pre-wrap;word-break:break-word;max-width:400px;line-height:1.4; }
+  </style>
+</head>
+<body>
+  <nav class="tab-nav">
+    <a href="/data-quality" class="tab active">Data Quality</a>
+    <span class="tab-spacer"></span>
+    <span class="tab-sep"></span>
+    <a href="/setup" class="tab-link">&#9881; Settings</a>
+  </nav>
+  <header>
+    <h1><span>&#9642;</span> Data Quality</h1>
+    <div class="subtitle">Production job health over the past 30 days &mdash; {{ creds.name or creds.account_prefix }}</div>
+  </header>
+  {% with messages = get_flashed_messages(with_categories=true) %}
+    {% for category, message in messages %}
+    <div class="flash flash-{{ category }}">{{ message }}</div>
+    {% endfor %}
+  {% endwith %}
+
+  <div class="summary-grid">
+    <div class="summary-card"><div class="label">Job Failure Rate</div><div class="value {% if summary.failure_pct > 50 %}value-red{% elif summary.failure_pct > 20 %}value-orange{% else %}value-green{% endif %}">{{ summary.failure_pct }}%</div><div class="detail">{{ summary.jobs_with_failures }} of {{ summary.total_scheduled_jobs }} scheduled jobs had failures</div></div>
+    <div class="summary-card"><div class="label">Total Prod Runs</div><div class="value">{{ summary.total_runs }}</div><div class="detail">Scheduled production runs in 30 days</div></div>
+    <div class="summary-card"><div class="label">Failed Runs</div><div class="value {% if summary.failed_runs > 0 %}value-red{% else %}value-green{% endif %}">{{ summary.failed_runs }}</div><div class="detail">{{ (summary.failed_runs / summary.total_runs * 100) | round(1) if summary.total_runs > 0 else 0 }}% of total runs</div></div>
+    <div class="summary-card"><div class="label">Models Affected</div><div class="value {% if summary.failed_models | length > 0 %}value-orange{% else %}value-green{% endif %}">{{ summary.failed_models | length }}</div><div class="detail">Models with errors or test failures</div></div>
+  </div>
+
+  <!-- Chart -->
+  <div class="chart-card">
+    <h2>Failed Runs Per Day (Past 30 Days)</h2>
+    <div class="chart-filter-info" id="chartFilterInfo">Showing: <span id="chartFilterLabel"></span> <button class="clear-filter" onclick="clearAllFilters()">&#x2715; Clear filter</button></div>
+    {% set max_count = summary.daily_failures | map(attribute='count') | max %}
+    {% if max_count and max_count > 0 %}
+    <div class="chart-outer">
+      <div class="chart-y-axis" id="chartYAxis" style="height:320px;"><span id="y4">{{ max_count }}</span><span id="y3">{{ ((max_count * 3) // 4) | int }}</span><span id="y2">{{ (max_count // 2) | int }}</span><span id="y1">{{ (max_count // 4) | int }}</span><span>0</span></div>
+      <div class="chart-body">
+        <div class="chart-bars" id="chartBars">
+          {% for day in summary.daily_failures %}
+          <div class="chart-bar-wrapper" data-date="{{ day.date }}" onclick="clickBar('{{ day.date }}')">
+            {% if day.count > 0 %}<div class="chart-bar" style="height:{{ (day.count / max_count * 100) | round(1) }}%;"><div class="chart-tooltip">{{ day.date }}<br>{{ day.count }} failure{{ 's' if day.count != 1 else '' }}</div></div>
+            {% else %}<div class="chart-bar-zero"></div>{% endif %}
+          </div>
+          {% endfor %}
+        </div>
+        <div class="chart-labels">{% for day in summary.daily_failures %}<div class="chart-label">{% if loop.index0 % 3 == 0 or loop.last %}{{ day.date[5:] }}{% endif %}</div>{% endfor %}</div>
+      </div>
+    </div>
+    {% else %}<div class="empty-state"><div class="icon">&#10003;</div><p>No failed runs in the past 30 days!</p></div>{% endif %}
+  </div>
+
+  <div class="section-tabs">
+    <button class="section-tab active" onclick="switchTab('jobs')">Job Failures</button>
+    <button class="section-tab" onclick="switchTab('models')">Model Failures</button>
+  </div>
+
+  <!-- Job Failures Tab -->
+  <div class="tab-panel active" id="tab-jobs">
+    <div class="table-card">
+      <h2>Job Success Rates (Past 30 Days)</h2>
+      {% if summary.job_success_rates | length > 0 %}
+      <table id="jobTable">
+        <thead><tr>
+          <th class="sortable" data-col="0" data-type="text">Job</th>
+          <th class="sortable" data-col="1" data-type="num">Success Rate</th>
+          <th class="sortable" data-col="2" data-type="num">Total Runs</th>
+          <th class="sortable" data-col="3" data-type="num">Succeeded</th>
+          <th class="sortable" data-col="4" data-type="num">Failed</th>
+          <th class="sortable" data-col="5" data-type="num">Cancelled</th>
+          <th class="sortable" data-col="6" data-type="num">Avg Models (Success)</th>
+          <th class="sortable" data-col="7" data-type="num">Avg Skipped (Failed)</th>
+        </tr></thead>
+        <tbody>
+          {% for job in summary.job_success_rates %}
+          <tr class="clickable-row" data-job-id="{{ job.job_id }}" data-sort='[{{ job.success_pct }}, {{ job.total_runs }}, {{ job.successful_runs }}, {{ job.failed_runs }}, {{ job.cancelled_runs }}, {{ job.avg_models_success if job.avg_models_success is not none else -1 }}, {{ job.avg_skipped_failed if job.avg_skipped_failed is not none else -1 }}]' onclick="clickJob(this, '{{ job.job_id }}', '{{ job.name | e }}')">
+            <td><span class="model-name">{{ job.name }}</span></td>
+            <td data-val="{{ job.success_pct }}">
+              <div style="display:flex;align-items:center;">
+                <div class="rate-bar-bg"><div class="rate-bar-fill" style="width:{{ job.success_pct }}%;background:{% if job.success_pct >= 95 %}var(--green){% elif job.success_pct >= 75 %}var(--orange){% else %}var(--red){% endif %};"></div></div>
+                <span class="rate-text {% if job.success_pct >= 95 %}value-green{% elif job.success_pct >= 75 %}value-orange{% else %}value-red{% endif %}">{{ job.success_pct }}%</span>
+              </div>
+            </td>
+            <td class="jc-total" data-base="{{ job.total_runs }}" data-val="{{ job.total_runs }}">{{ job.total_runs }}</td>
+            <td class="jc-success" data-base="{{ job.successful_runs }}" data-val="{{ job.successful_runs }}" style="color:var(--green);">{{ job.successful_runs }}</td>
+            <td class="jc-failed" data-base="{{ job.failed_runs }}" data-val="{{ job.failed_runs }}" style="color:{% if job.failed_runs > 0 %}var(--red){% else %}var(--text-muted){% endif %};">{{ job.failed_runs }}</td>
+            <td class="jc-cancelled" data-base="{{ job.cancelled_runs }}" data-val="{{ job.cancelled_runs }}" style="color:var(--text-muted);">{{ job.cancelled_runs }}</td>
+            <td data-val="{{ job.avg_models_success if job.avg_models_success is not none else -1 }}">{% if job.avg_models_success is not none %}{{ job.avg_models_success }}{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ job.avg_skipped_failed if job.avg_skipped_failed is not none else -1 }}">{% if job.avg_skipped_failed is not none %}<span style="color:var(--orange);">{{ job.avg_skipped_failed }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+          </tr>
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="empty-state"><p>No scheduled jobs found.</p></div>{% endif %}
+    </div>
+  </div>
+
+  <!-- Model Failures Tab -->
+  <div class="tab-panel" id="tab-models">
+    <div class="table-card">
+      <h2>Models with Errors or Test Failures</h2>
+      {% if summary.failed_models | length > 0 %}
+      <table id="modelTable">
+        <thead><tr>
+          <th class="sortable" data-col="0" data-type="text">Model</th>
+          <th>Issue Type</th>
+          <th class="sortable" data-col="2" data-type="num">Model Errors</th>
+          <th class="sortable" data-col="3" data-type="num">Failed Tests</th>
+          <th class="sortable" data-col="4" data-type="num">Executions (30d)</th>
+          <th class="sortable" data-col="5" data-type="num">Dwnstrm Executions</th>
+          <th class="sortable" data-col="6" data-type="num">High Impact</th>
+          <th class="sortable" data-col="7" data-type="num">High Impact Dwnstrm</th>
+          <th class="sortable" data-col="8" data-type="num">Upstream</th>
+          <th class="sortable" data-col="9" data-type="num">Downstream</th>
+          <th></th>
+        </tr></thead>
+        <tbody>
+          {% for model in summary.failed_models %}
+          <tr class="model-row" data-dates="{{ model.failure_dates | join(',') }}">
+            <td><div class="model-name">{{ model.name }}</div><div style="font-size:0.7rem;color:var(--text-muted);">{{ model.unique_id }}</div></td>
+            <td>{% if model.has_model_errors %}<span class="badge badge-error">Execution Error</span> {% endif %}{% if model.has_test_failures %}<span class="badge badge-test">Test Failure</span>{% endif %}</td>
+            <td data-val="{{ model.error_count }}">{% if model.error_count > 0 %}<span style="color:var(--red);font-weight:600;">{{ model.error_count }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.test_failure_count }}">{% if model.test_failure_count > 0 %}<span style="color:var(--orange);font-weight:600;">{{ model.test_failure_count }} <span style="font-weight:400;color:var(--text-muted);font-size:0.75rem;">({{ model.test_occurrence_count }}x)</span></span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.query_count }}">{% if model.query_count > 0 %}<span style="font-weight:600;">{{ model.query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+            <td data-val="{{ model.downstream_query_count }}">{% if model.downstream_query_count > 0 %}<span style="font-weight:600;">{{ model.downstream_query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+            <td data-val="{% if model.is_high_impact %}1{% else %}0{% endif %}">{% if model.is_high_impact %}<span class="badge" style="background:rgba(248,113,113,0.15);color:var(--red);">High Impact</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{% if model.is_high_impact_downstream %}1{% else %}0{% endif %}">{% if model.is_high_impact_downstream %}<span class="badge" style="background:rgba(251,191,36,0.15);color:var(--orange);">High Impact</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ model.upstream_count }}">{% if model.upstream_count > 0 %}<span style="color:var(--accent);">{{ model.upstream_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+            <td data-val="{{ model.downstream_count }}">{% if model.downstream_count > 0 %}<span style="color:var(--blue);">{{ model.downstream_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+            <td>{% if model.has_model_errors or model.has_test_failures %}<button class="toggle-btn" onclick="toggleDetails(this)">Show details</button>{% endif %}</td>
+          </tr>
+          {% if model.all_errors %}
+          <tr class="detail-row" style="display:none;">
+            <td colspan="11" style="padding-top:0;padding-bottom:1rem;">
+              <div class="detail-section">
+                <div style="font-size:0.75rem;font-weight:600;color:var(--text);margin-bottom:0.5rem;">Error History ({{ model.all_errors | length }})</div>
+                <table style="width:100%;border-collapse:collapse;"><thead><tr>
+                  <th class="inner-th" style="width:80px;">Date</th>
+                  <th class="inner-th" style="width:55px;">Time</th>
+                  <th class="inner-th" style="width:180px;">Job</th>
+                  <th class="inner-th" style="width:70px;">Source</th>
+                  <th class="inner-th" style="width:130px;">Error Type</th>
+                  <th class="inner-th">Error Details</th>
+                </tr></thead><tbody>
+                  {% for err in model.all_errors %}
+                  <tr class="err-row" data-date="{{ err.date }}">
+                    <td class="inner-td" style="color:var(--text-muted);white-space:nowrap;">{{ err.date }}</td>
+                    <td class="inner-td" style="color:var(--text-muted);white-space:nowrap;">{{ err.time }}</td>
+                    <td class="inner-td" style="color:var(--blue);">{{ err.job_name }}</td>
+                    <td class="inner-td">{% if err.source == 'execution' %}<span class="badge badge-error">Model</span>{% else %}<span class="badge badge-test">Test</span>{% endif %}</td>
+                    <td class="inner-td">{% if err.source == 'execution' %}<span class="badge badge-error">{{ err.error_type }}</span>{% else %}<span class="badge badge-test">{{ err.error_type }}</span>{% if err.column_name %}<span style="font-size:0.68rem;color:var(--text-muted);display:block;">col: {{ err.column_name }}</span>{% endif %}{% endif %}</td>
+                    <td class="inner-td-detail">{% if err.source == 'test' and err.compiled_code %}<div style="color:var(--orange);font-size:0.72rem;margin-bottom:0.25rem;">{% if err.failures_count is not none %}{{ err.failures_count }} failing record{{ 's' if err.failures_count != 1 else '' }}{% endif %}</div><code style="display:block;font-size:0.72rem;color:var(--text-muted);background:rgba(0,0,0,0.3);padding:0.5rem;border-radius:4px;white-space:pre-wrap;word-break:break-all;font-family:monospace;">{{ err.compiled_code }}</code>{% elif err.source == 'test' %}<div style="color:var(--orange);">{{ err.error_details }}</div>{% else %}<div style="color:var(--red);">{{ err.error_details }}</div>{% endif %}</td>
+                  </tr>
+                  {% endfor %}
+                </tbody></table>
+              </div>
+            </td>
+          </tr>
+          {% endif %}
+          {% endfor %}
+        </tbody>
+      </table>
+      {% else %}<div class="empty-state"><div class="icon">&#10003;</div><p>No model or test failures in the past 30 days.</p></div>{% endif %}
+    </div>
+  </div>
+
+<script>
+const jobDailyMap = {{ summary.job_daily_map | tojson }};
+const dateJobIds = {{ summary.date_job_ids | tojson }};
+const jobDateRuns = {{ summary.job_date_runs | tojson }};
+const allDailyData = {{ summary.daily_failures | tojson }};
+const maxCountAll = Math.max(...allDailyData.map(d => d.count), 1);
+let selectedJobId = null, selectedDate = null;
+
+function switchTab(tab) {
+  document.querySelectorAll('.section-tab').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.tab-panel').forEach(el => el.classList.remove('active'));
+  document.getElementById('tab-' + tab).classList.add('active');
+  event.currentTarget.classList.add('active');
+}
+
+function toggleDetails(btn) {
+  var row = btn.closest('tr'), detailRow = row.nextElementSibling;
+  if (detailRow && detailRow.classList.contains('detail-row')) {
+    var show = detailRow.style.display === 'none';
+    detailRow.style.display = show ? '' : 'none';
+    btn.textContent = show ? 'Hide details' : 'Show details';
+  }
+}
+
+function updateChart(dailyCounts, maxVal, filterLabel) {
+  var filterInfo = document.getElementById('chartFilterInfo');
+  if (filterLabel) { filterInfo.style.display = ''; document.getElementById('chartFilterLabel').textContent = filterLabel; }
+  else { filterInfo.style.display = 'none'; }
+  document.getElementById('y4').textContent = maxVal;
+  document.getElementById('y3').textContent = Math.round(maxVal * 3 / 4);
+  document.getElementById('y2').textContent = Math.round(maxVal / 2);
+  document.getElementById('y1').textContent = Math.round(maxVal / 4);
+  document.querySelectorAll('#chartBars .chart-bar-wrapper').forEach(function(w) {
+    var date = w.getAttribute('data-date'), count = dailyCounts[date] || 0;
+    var bar = w.querySelector('.chart-bar'), zeroBar = w.querySelector('.chart-bar-zero');
+    if (count > 0) {
+      if (bar) { bar.style.height = (count/maxVal*100)+'%'; bar.classList.remove('dimmed'); var tt = bar.querySelector('.chart-tooltip'); if(tt) tt.innerHTML = date+'<br>'+count+' failure'+(count!==1?'s':''); }
+      else if (zeroBar) { var nb = document.createElement('div'); nb.className='chart-bar'; nb.style.height=(count/maxVal*100)+'%'; nb.innerHTML='<div class="chart-tooltip">'+date+'<br>'+count+' failure'+(count!==1?'s':'')+'</div>'; zeroBar.replaceWith(nb); }
+    } else { if (bar) { bar.style.height='0%'; bar.classList.add('dimmed'); } }
+  });
+}
+
+// --- Table filtering ---
+function filterJobTable(date) {
+  var jobIds = date ? (dateJobIds[date] || []) : null;
+  document.querySelectorAll('#tab-jobs .clickable-row').forEach(function(row) {
+    var jid = row.getAttribute('data-job-id');
+    if (!jobIds) { row.style.display = ''; resetJobRowCounts(row); }
+    else {
+      row.style.display = jobIds.includes(jid) ? '' : 'none';
+      if (jobIds.includes(jid)) updateJobRowCounts(row, jid, date);
+    }
+  });
+}
+
+function updateJobRowCounts(row, jid, date) {
+  var data = (jobDateRuns[jid] || {})[date] || {total:0, success:0, failed:0, cancelled:0};
+  row.querySelector('.jc-total').textContent = data.total;
+  row.querySelector('.jc-success').textContent = data.success;
+  row.querySelector('.jc-failed').textContent = data.failed;
+  row.querySelector('.jc-cancelled').textContent = data.cancelled;
+}
+
+function resetJobRowCounts(row) {
+  row.querySelector('.jc-total').textContent = row.querySelector('.jc-total').getAttribute('data-base');
+  row.querySelector('.jc-success').textContent = row.querySelector('.jc-success').getAttribute('data-base');
+  row.querySelector('.jc-failed').textContent = row.querySelector('.jc-failed').getAttribute('data-base');
+  row.querySelector('.jc-cancelled').textContent = row.querySelector('.jc-cancelled').getAttribute('data-base');
+}
+
+function filterModelTable(date) {
+  document.querySelectorAll('#tab-models .model-row').forEach(function(row) {
+    var detailRow = row.nextElementSibling;
+    if (!date) {
+      row.style.display = '';
+      if (detailRow && detailRow.classList.contains('detail-row')) { detailRow.style.display = 'none'; }
+      // Show all err-rows in details
+      if (detailRow) detailRow.querySelectorAll('.err-row').forEach(function(r) { r.style.display = ''; });
+    } else {
+      var dates = (row.getAttribute('data-dates') || '').split(',');
+      var match = dates.includes(date);
+      row.style.display = match ? '' : 'none';
+      if (detailRow && detailRow.classList.contains('detail-row')) {
+        if (!match) detailRow.style.display = 'none';
+        // Filter detail rows to this date
+        detailRow.querySelectorAll('.err-row').forEach(function(r) {
+          r.style.display = r.getAttribute('data-date') === date ? '' : 'none';
+        });
+      }
+    }
+    var btn = row.querySelector('.toggle-btn');
+    if (btn) btn.textContent = 'Show details';
+  });
+}
+
+function clickJob(rowEl, jobId, jobName) {
+  if (selectedJobId === jobId) { clearAllFilters(); return; }
+  selectedJobId = jobId; selectedDate = null;
+  document.querySelectorAll('.clickable-row').forEach(function(r) { r.classList.remove('selected'); });
+  rowEl.classList.add('selected');
+  var jobData = jobDailyMap[jobId] || {};
+  updateChart(jobData, Math.max(...Object.values(jobData), 1), jobName);
+  document.querySelectorAll('.chart-bar-wrapper').forEach(function(w) { w.classList.remove('selected'); });
+  filterJobTable(null); filterModelTable(null);
+}
+
+function clickBar(date) {
+  if (selectedDate === date) { clearAllFilters(); return; }
+  selectedDate = date; selectedJobId = null;
+  var allCounts = {}; allDailyData.forEach(function(d) { allCounts[d.date] = d.count; });
+  updateChart(allCounts, maxCountAll, 'Filtering for ' + date);
+  document.querySelectorAll('.chart-bar-wrapper').forEach(function(w) { w.classList.toggle('selected', w.getAttribute('data-date') === date); });
+  document.querySelectorAll('.clickable-row').forEach(function(r) { r.classList.remove('selected'); });
+  filterJobTable(date); filterModelTable(date);
+}
+
+function clearAllFilters() {
+  selectedJobId = null; selectedDate = null;
+  var allCounts = {}; allDailyData.forEach(function(d) { allCounts[d.date] = d.count; });
+  updateChart(allCounts, maxCountAll, null);
+  document.querySelectorAll('.clickable-row').forEach(function(r) { r.classList.remove('selected'); });
+  document.querySelectorAll('.chart-bar-wrapper').forEach(function(w) { w.classList.remove('selected'); });
+  filterJobTable(null); filterModelTable(null);
+}
+
+// --- Sortable tables ---
+document.querySelectorAll('th.sortable').forEach(function(th) {
+  th.addEventListener('click', function(e) {
+    e.stopPropagation();
+    var table = th.closest('table'), tbody = table.querySelector('tbody');
+    var col = parseInt(th.getAttribute('data-col')), type = th.getAttribute('data-type');
+    var asc = !th.classList.contains('sort-asc');
+    // Clear sort indicators on sibling headers
+    th.closest('tr').querySelectorAll('th').forEach(function(h) { h.classList.remove('sort-asc', 'sort-desc'); });
+    th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+    // Collect rows (skip detail rows)
+    var rows = [];
+    tbody.querySelectorAll('tr').forEach(function(row) {
+      if (row.classList.contains('detail-row')) return;
+      rows.push(row);
+    });
+    rows.sort(function(a, b) {
+      var aVal, bVal;
+      if (type === 'num') {
+        var aCell = a.querySelectorAll('td')[col], bCell = b.querySelectorAll('td')[col];
+        aVal = parseFloat(aCell.getAttribute('data-val') || aCell.textContent.replace(/[^0-9.\-]/g, '')) || 0;
+        bVal = parseFloat(bCell.getAttribute('data-val') || bCell.textContent.replace(/[^0-9.\-]/g, '')) || 0;
+      } else {
+        aVal = a.querySelectorAll('td')[col].textContent.trim().toLowerCase();
+        bVal = b.querySelectorAll('td')[col].textContent.trim().toLowerCase();
+      }
+      if (aVal < bVal) return asc ? -1 : 1;
+      if (aVal > bVal) return asc ? 1 : -1;
+      return 0;
+    });
+    // Re-insert rows (with their detail rows)
+    rows.forEach(function(row) {
+      tbody.appendChild(row);
+      var next = row.nextElementSibling;
+      // The detail row might not be adjacent anymore, find it
+      var detailRow = null;
+      var allRows = Array.from(tbody.querySelectorAll('tr.detail-row'));
+      // For model table, detail rows follow their parent
+      if (row.classList.contains('model-row')) {
+        // Find detail row that was originally after this row
+        var nextSib = row.nextElementSibling;
+        if (nextSib && nextSib.classList.contains('detail-row')) {
+          tbody.appendChild(nextSib);
+        }
+      }
+    });
+  });
+});
+</script>
+</body>
+</html>

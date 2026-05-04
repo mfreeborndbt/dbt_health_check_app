@@ -1,0 +1,195 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ project_name }} — Loading {{ page_name }}</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2218%22 fill=%22%2334d399%22/><text y=%2272%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2258%22 font-family=%22system-ui%22 font-weight=%22700%22 fill=%22white%22>H</text></svg>">
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2a2d3a;
+      --text: #e1e4ed;
+      --text-muted: #8b8fa3;
+      --accent: #34d399;
+      --green: #34d399;
+      --red: #f87171;
+    }
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, monospace;
+      background: var(--bg);
+      color: var(--text);
+      display: flex;
+      flex-direction: column;
+      min-height: 100vh;
+    }
+    .tab-nav { display: flex; align-items: center; border-bottom: 1px solid var(--border); padding: 0 2rem; }
+    .tab { padding: 0.6rem 1.25rem; font-size: 0.85rem; color: var(--text-muted); text-decoration: none; border-bottom: 2px solid transparent; margin-bottom: -1px; }
+    .tab:hover { color: var(--text); }
+    .tab.active { color: var(--accent); border-bottom-color: var(--accent); font-weight: 600; }
+    .tab-spacer { flex: 1; }
+    .tab-sep { width: 1px; height: 1.1rem; background: var(--border); margin: 0 0.25rem; align-self: center; }
+    .tab-link { padding: 0.6rem 0.75rem; font-size: 0.78rem; color: var(--text-muted); text-decoration: none; }
+
+    .content {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 2rem;
+    }
+    .loader-card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      width: 100%;
+      max-width: 720px;
+      overflow: hidden;
+    }
+    .loader-header {
+      padding: 1rem 1.25rem;
+      border-bottom: 1px solid var(--border);
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+    .loader-header h2 { font-size: 1rem; font-weight: 600; }
+    .loader-header h2 span { color: var(--accent); }
+    .loader-header .status { margin-left: auto; font-size: 0.75rem; color: var(--text-muted); }
+    .progress-bar { height: 3px; background: var(--border); overflow: hidden; }
+    .progress-bar .fill { height: 100%; width: 30%; background: var(--accent); border-radius: 3px; animation: slide 1.4s ease-in-out infinite; }
+    @keyframes slide { 0% { transform: translateX(-100%); } 100% { transform: translateX(400%); } }
+    .progress-bar .fill.done { width: 100%; background: var(--green); animation: none; transition: width 0.3s, background 0.3s; }
+
+    .terminal {
+      padding: 1rem 1.25rem;
+      max-height: 420px;
+      overflow-y: auto;
+      font-family: 'SF Mono', 'Fira Code', Menlo, Consolas, monospace;
+      font-size: 0.78rem;
+      line-height: 1.6;
+      scroll-behavior: smooth;
+    }
+    .terminal .line { display: flex; gap: 0.75rem; opacity: 0; animation: fadeIn 0.15s forwards; }
+    @keyframes fadeIn { to { opacity: 1; } }
+    .terminal .ts { color: var(--text-muted); flex-shrink: 0; user-select: none; }
+    .terminal .msg { color: var(--text); white-space: pre-wrap; word-break: break-word; }
+    .terminal .msg.indent { color: var(--text-muted); }
+    .terminal .msg.done { color: var(--green); font-weight: 600; }
+    .terminal .msg.error { color: var(--red); font-weight: 600; }
+
+    .loader-footer {
+      padding: 0.75rem 1.25rem;
+      border-top: 1px solid var(--border);
+      font-size: 0.72rem;
+      color: var(--text-muted);
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+    .elapsed { font-variant-numeric: tabular-nums; }
+  </style>
+</head>
+<body>
+  <nav class="tab-nav">
+    <a href="/data-quality" class="tab">Data Quality</a>
+    <span class="tab-spacer"></span>
+    <span class="tab-sep"></span>
+    <a href="/setup" class="tab-link">&#9881; Settings</a>
+  </nav>
+
+  <div class="content">
+    <div class="loader-card">
+      <div class="loader-header">
+        <h2><span>&#9642;</span> {{ project_name }} <span style="color:var(--text-muted);font-weight:400;">/ {{ page_name }}</span></h2>
+        <div class="status" id="statusText">Connecting...</div>
+      </div>
+      <div class="progress-bar"><div class="fill" id="progressFill"></div></div>
+      <div class="terminal" id="terminal"></div>
+      <div class="loader-footer">
+        <span>Fetching data from dbt Cloud</span>
+        <button id="loadCancelBtn" onclick="window.history.back()" style="display:none;margin-left:auto;background:transparent;border:1px solid var(--border);border-radius:6px;padding:0.25rem 0.75rem;color:var(--text-muted);font-size:0.72rem;cursor:pointer;font-family:inherit;">Cancel</button>
+        <span style="margin-left:auto;" class="elapsed" id="elapsed">0s</span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const terminal = document.getElementById('terminal');
+    const statusText = document.getElementById('statusText');
+    const progressFill = document.getElementById('progressFill');
+    const elapsedEl = document.getElementById('elapsed');
+    const startTime = Date.now();
+
+    const cancelBtn = document.getElementById('loadCancelBtn');
+    setInterval(() => {
+      const s = Math.floor((Date.now() - startTime) / 1000);
+      elapsedEl.textContent = s + 's';
+      if (s >= 3 && cancelBtn) cancelBtn.style.display = '';
+    }, 1000);
+
+    function addLine(text, cls) {
+      const now = new Date();
+      const ts = now.toLocaleTimeString('en-US', { hour12: false });
+      const div = document.createElement('div');
+      div.className = 'line';
+      const isIndented = text.startsWith('  ') || text.startsWith('Fetched ');
+      const msgClass = cls || (isIndented ? 'indent' : '');
+      div.innerHTML = '<span class="ts">' + ts + '</span><span class="msg ' + msgClass + '">' +
+        text.replace(/&/g,'&amp;').replace(/</g,'&lt;') + '</span>';
+      terminal.appendChild(div);
+      terminal.scrollTop = terminal.scrollHeight;
+    }
+
+    const page = {{ next_page | tojson }};
+    const es = new EventSource('/api/load?page=' + encodeURIComponent(page));
+
+    es.onopen = function() { statusText.textContent = 'Loading...'; };
+
+    es.onmessage = function(e) {
+      const data = JSON.parse(e.data);
+      if (data.type === 'log') {
+        addLine(data.message);
+      } else if (data.type === 'done') {
+        es.close();
+        statusText.textContent = 'Ready';
+        statusText.style.color = 'var(--green)';
+        progressFill.classList.add('done');
+        addLine('Loading complete. Redirecting...', 'done');
+        setTimeout(() => { window.location.href = data.redirect; }, 600);
+      } else if (data.type === 'error') {
+        es.close();
+        statusText.textContent = 'Error';
+        statusText.style.color = 'var(--red)';
+        progressFill.style.background = 'var(--red)';
+        progressFill.style.animation = 'none';
+        progressFill.style.width = '100%';
+        addLine('Error: ' + data.message, 'error');
+        const isAuthError = /401|403|Unauthorized|Forbidden/i.test(data.message);
+        if (isAuthError) {
+          addLine('Check your credentials at /setup', 'error');
+        } else {
+          addLine('This may be a transient API issue. Click Retry to try again.', 'error');
+        }
+        const btn = document.createElement('button');
+        btn.textContent = 'Retry';
+        btn.style.cssText = 'margin-top:0.75rem;background:var(--accent);color:#0f1117;border:none;border-radius:6px;padding:0.5rem 1.25rem;font-size:0.85rem;cursor:pointer;font-family:inherit;font-weight:600;';
+        btn.onclick = function() { window.location.reload(); };
+        terminal.appendChild(btn);
+        terminal.scrollTop = terminal.scrollHeight;
+      }
+    };
+
+    es.onerror = function() {
+      es.close();
+      statusText.textContent = 'Connection lost';
+      statusText.style.color = 'var(--red)';
+      addLine('Lost connection to server. Retrying...', 'error');
+      setTimeout(() => { window.location.reload(); }, 3000);
+    };
+  </script>
+</body>
+</html>
