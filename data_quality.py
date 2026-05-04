@@ -18,7 +18,7 @@ _SUMMARY_CACHE_LOCK = threading.Lock()
 
 
 def _summary_db_key(client):
-    return f"dq_summary_v13:{client.account_id}:{client.project_id}:{client.environment_id}"
+    return f"dq_summary_v20:{client.account_id}:{client.project_id}:{client.environment_id}"
 
 
 def _summary_cache_get(client):
@@ -230,7 +230,7 @@ def _fetch_all_run_details_parallel(client, runs, max_workers=8, label=""):
 
 def _fetch_single_run_results(client, run_id):
     """Fetch run_results.json artifact for a run to get per-model error messages."""
-    key = _cache_key("run_results", client.account_id, run_id)
+    key = _cache_key("run_results_v2", client.account_id, run_id)
     cached = _cache_get(key)
     if cached is not None:
         return run_id, cached
@@ -243,7 +243,7 @@ def _fetch_single_run_results(client, run_id):
         for r in results:
             uid = r.get("unique_id", "")
             status = r.get("status", "")
-            if status in ("error", "fail"):
+            if status in ("error", "fail", "warn"):
                 message = r.get("message") or ""
                 # Clean up message — take first meaningful lines
                 lines = message.strip().split("\n")
@@ -276,7 +276,7 @@ def _fetch_all_run_results_parallel(client, failed_runs, max_workers=8):
 
     for run in failed_runs:
         run_id = run["id"]
-        key = _cache_key("run_results", client.account_id, run_id)
+        key = _cache_key("run_results_v2", client.account_id, run_id)
         cached = _cache_get(key)
         if cached is not None:
             results[run_id] = cached
@@ -453,7 +453,7 @@ def _fetch_model_usage_query_counts(client: DbtClient):
 
 def _fetch_test_compiled_code(client: DbtClient):
     """Fetch compiledCode for all tests from Discovery API."""
-    key = _cache_key("test_compiled_v1", client.account_id, client.environment_id)
+    key = _cache_key("test_compiled_v2", client.account_id, client.environment_id)
     cached = _cache_get(key)
     if cached is not None:
         return cached
@@ -468,6 +468,7 @@ def _fetch_test_compiled_code(client: DbtClient):
             edges {
               node {
                 uniqueId
+                name
                 compiledCode
               }
             }
@@ -476,7 +477,8 @@ def _fetch_test_compiled_code(client: DbtClient):
       }
     }
     """
-    test_sql = {}
+    test_sql = {}  # uid -> code
+    test_sql_by_name = {}  # name -> code (fallback for UID mismatches)
     cursor = None
     while True:
         variables = {"environmentId": client.environment_id, "first": 500}
@@ -486,21 +488,25 @@ def _fetch_test_compiled_code(client: DbtClient):
             data = client.query_discovery(query, variables=variables)
         except Exception as e:
             print(f"[{client.name}] Could not fetch test compiled SQL: {e}")
-            _cache_set(key, {})
-            return {}
+            _cache_set(key, {"by_uid": {}, "by_name": {}})
+            return {"by_uid": {}, "by_name": {}}
         tests_data = data["environment"]["applied"]["tests"]
         for edge in tests_data["edges"]:
             node = edge["node"]
             code = (node.get("compiledCode") or "").strip()
             if code:
                 test_sql[node["uniqueId"]] = code
+                name = node.get("name") or ""
+                if name:
+                    test_sql_by_name[name] = code
         if not tests_data["pageInfo"]["hasNextPage"]:
             break
         cursor = tests_data["pageInfo"]["endCursor"]
 
-    _cache_set(key, test_sql)
-    print(f"[{client.name}] Fetched compiled SQL for {len(test_sql)} tests")
-    return test_sql
+    result = {"by_uid": test_sql, "by_name": test_sql_by_name}
+    _cache_set(key, result)
+    print(f"[{client.name}] Fetched compiled SQL for {len(test_sql)} tests ({len(test_sql_by_name)} by name)")
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -510,7 +516,7 @@ def _fetch_test_compiled_code(client: DbtClient):
 def _fetch_high_impact_signals(client: DbtClient):
     """Fetch semantic model refs, exposure refs, and public models.
     Returns dict: {uid: set of reason tags}."""
-    key = _cache_key("hi_signals_v5", client.account_id, client.environment_id)
+    key = _cache_key("hi_signals_v6", client.account_id, client.environment_id)
     cached = _cache_get(key)
     if cached is not None and isinstance(cached, dict) and "signals" in cached:
         return cached
@@ -599,6 +605,8 @@ def _fetch_high_impact_signals(client: DbtClient):
     """
     all_tags = set()
     model_tags_map = {}  # uid -> list of tags
+    public_model_uids = set()
+    contract_model_uids = set()
     cursor = None
     while True:
         variables = {"environmentId": client.environment_id, "first": 500}
@@ -613,12 +621,13 @@ def _fetch_high_impact_signals(client: DbtClient):
         for edge in models_data["edges"]:
             node = edge["node"]
             uid = node["uniqueId"]
-            # Only count as "Public Model" if contract is also enforced,
-            # since public is the default access level in dbt
-            if node.get("access") == "public" and node.get("contractEnforced"):
-                signals[uid].add("Public Model")
-            if node.get("contractEnforced"):
+            is_public = node.get("access") == "public"
+            is_contract = bool(node.get("contractEnforced"))
+            if is_public:
+                public_model_uids.add(uid)
+            if is_contract:
                 signals[uid].add("Contract Enforced")
+                contract_model_uids.add(uid)
             tags = node.get("tags") or []
             if tags:
                 all_tags.update(tags)
@@ -637,6 +646,8 @@ def _fetch_high_impact_signals(client: DbtClient):
         "signals": {uid: list(reasons) for uid, reasons in signals.items()},
         "all_tags": sorted(all_tags),
         "model_tags": model_tags_map,
+        "public_model_uids": list(public_model_uids),
+        "contract_model_uids": list(contract_model_uids),
     }
     _cache_set(key, result)
     return result
@@ -681,16 +692,54 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
     hi_signals = {uid: set(reasons) for uid, reasons in raw_signals.items()}
     all_project_tags = hi_data.get("all_tags", []) if isinstance(hi_data, dict) else []
     model_tags_map = hi_data.get("model_tags", {}) if isinstance(hi_data, dict) else {}
-    test_compiled_sql = _fetch_test_compiled_code(client)
+    public_model_uids = set(hi_data.get("public_model_uids", []) if isinstance(hi_data, dict) else [])
+    contract_model_uids = set(hi_data.get("contract_model_uids", []) if isinstance(hi_data, dict) else [])
+    test_compiled_data = _fetch_test_compiled_code(client)
+    # Support both old format (flat dict) and new format (by_uid + by_name)
+    if isinstance(test_compiled_data, dict) and "by_uid" in test_compiled_data:
+        test_compiled_by_uid = test_compiled_data["by_uid"]
+        test_compiled_by_name = test_compiled_data["by_name"]
+    else:
+        test_compiled_by_uid = test_compiled_data
+        test_compiled_by_name = {}
 
-    # Apply high-impact tags from user config
-    hi_tag_set = set((load_credentials() or {}).get("high_impact_tags") or [])
+    def _get_test_sql(test_uid, test_name="", column_name="", model_name=""):
+        """Always find compiled SQL — by UID, then name, then model+column search."""
+        code = test_compiled_by_uid.get(test_uid, "")
+        if not code and test_name:
+            code = test_compiled_by_name.get(test_name, "")
+        if not code and model_name and column_name:
+            # Search for any compiled SQL referencing this model and column
+            for sql in test_compiled_by_name.values():
+                if model_name in sql and column_name in sql:
+                    code = sql
+                    break
+        if not code and model_name:
+            # Last resort: any test SQL mentioning this model
+            for n, sql in test_compiled_by_name.items():
+                if model_name in n:
+                    code = sql
+                    break
+        return code
+
+    # Apply user config: tags, public model mode
+    creds = load_credentials() or {}
+    hi_tag_set = set(creds.get("high_impact_tags") or [])
+    public_mode = creds.get("public_model_mode", "public_with_contract")
+
+    # Apply public model signal based on user config
+    if public_mode == "public_only":
+        for uid in public_model_uids:
+            hi_signals.setdefault(uid, set()).add("Public Model")
+    else:
+        for uid in public_model_uids & contract_model_uids:
+            hi_signals.setdefault(uid, set()).add("Public Model")
+
+    # Apply high-impact tags
     if hi_tag_set:
         for uid, tags in model_tags_map.items():
             if hi_tag_set & set(tags):
-                if uid not in hi_signals:
-                    hi_signals[uid] = set()
-                hi_signals[uid].add("High Impact Tag")
+                hi_signals.setdefault(uid, set()).add("High Impact Tag")
 
     # Fetch details for failed runs (parallel)
     failed_run_details = {}
@@ -837,7 +886,7 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
     # Model & test failures with detailed error messages
     # -----------------------------------------------------------------------
     # Track both execution errors and test failures as per-occurrence rows
-    model_entries = defaultdict(lambda: {"name": "", "unique_id": "", "errors": [], "test_errors": []})
+    model_entries = defaultdict(lambda: {"name": "", "unique_id": "", "errors": [], "test_errors": [], "test_warnings": []})
 
     if failed_runs:
         for run in failed_runs:
@@ -876,6 +925,42 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
                         "run_id": run_id,
                     })
 
+            # Test warnings
+            for t in details["tests"]:
+                if t["status"] == "warn":
+                    depends_on = t.get("dependsOn") or []
+                    test_uid = t["uniqueId"]
+                    test_name = t.get("name") or test_uid
+                    column_name = t.get("columnName") or ""
+                    # Get model name from first model dependency for SQL lookup
+                    _dep_model = next((d.split(".")[-1] for d in depends_on if d.startswith("model.")), "")
+                    test_compiled_code = _get_test_sql(test_uid, test_name, column_name, _dep_model)
+                    test_error_type = _classify_test_error(test_name, "")
+
+                    # Get warning details from run_results.json
+                    warn_result = error_map.get(test_uid, {})
+                    warn_failures_count = warn_result.get("failures")
+
+                    warn_detail = f"{warn_failures_count} warning record{'s' if warn_failures_count != 1 else ''}" if warn_failures_count else "Test warned"
+
+                    for dep in depends_on:
+                        if dep.startswith("model."):
+                            model_name = dep.split(".")[-1]
+                            model_entries[dep]["name"] = model_name
+                            model_entries[dep]["unique_id"] = dep
+                            model_entries[dep]["test_warnings"].append({
+                                "date": run_date,
+                                "time": run_time,
+                                "job_name": job_name,
+                                "test_name": test_name,
+                                "column_name": column_name,
+                                "error_type": test_error_type,
+                                "error_details": warn_detail,
+                                "compiled_code": test_compiled_code,
+                                "failures_count": warn_failures_count,
+                                "run_id": run_id,
+                            })
+
             # Test failures — per-occurrence with date/time/job
             for t in details["tests"]:
                 if t["status"] in ("error", "fail"):
@@ -889,8 +974,9 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
                     test_error_msg = test_result.get("message", "")
                     test_failures_count = test_result.get("failures")
                     test_error_type = _classify_test_error(test_name, test_error_msg)
-                    # Get compiled SQL from Discovery API (not run_results.json)
-                    test_compiled_code = test_compiled_sql.get(test_uid, "")
+                    # Get compiled SQL from Discovery API
+                    _dep_model = next((d.split(".")[-1] for d in depends_on if d.startswith("model.")), "")
+                    test_compiled_code = _get_test_sql(test_uid, test_name, column_name, _dep_model)
 
                     # Build rich error detail — prefer compiled SQL for tests
                     detail_parts = []
@@ -921,10 +1007,11 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
     # -----------------------------------------------------------------------
     # High impact reasons per model
     # -----------------------------------------------------------------------
-    # Top 20% by query count = "Heavy Usage"
+    # Top N% by query count = "Heavy Usage" (configurable, default 20%)
+    heavy_pct = creds.get("heavy_usage_pct", 20)
     nonzero_counts = sorted([c for c in model_query_stats.values() if c > 0], reverse=True)
     if nonzero_counts:
-        threshold_idx = max(1, len(nonzero_counts) // 5)  # top 20%
+        threshold_idx = max(1, len(nonzero_counts) * heavy_pct // 100)
         query_threshold = nonzero_counts[threshold_idx - 1]
     else:
         query_threshold = float('inf')
@@ -962,20 +1049,22 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
         name = info["name"] or uid.split(".")[-1]
         errors = info["errors"]
         test_errors = info["test_errors"]
+        test_warnings = info["test_warnings"]
 
-        # Count unique tests (for summary column)
         unique_tests = set()
         for te in test_errors:
             unique_tests.add(te["test_name"])
+        unique_warnings = set()
+        for tw in test_warnings:
+            unique_warnings.add(tw["test_name"])
 
-        # Collect all dates this model had failures
         failure_dates = set()
         for e in errors:
             failure_dates.add(e["date"])
         for te in test_errors:
             failure_dates.add(te["date"])
 
-        # Merge into single combined list with source tag
+        # Merge errors + test failures into one list
         all_errors = []
         for e in errors:
             all_errors.append({**e, "source": "execution"})
@@ -983,16 +1072,28 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
             all_errors.append({**te, "source": "test"})
         all_errors.sort(key=lambda e: (e["date"], e["time"]), reverse=True)
 
+        # Warnings list (separate)
+        all_warnings = []
+        for tw in test_warnings:
+            all_warnings.append({**tw, "source": "warning"})
+        all_warnings.sort(key=lambda e: (e["date"], e["time"]), reverse=True)
+
         reasons = sorted(model_hi_reasons.get(uid, set()))
+        total_issues = len(errors) + len(test_errors) + len(test_warnings)
         failed_models.append({
             "unique_id": uid,
             "name": name,
             "error_count": len(errors),
             "test_failure_count": len(unique_tests),
             "test_occurrence_count": len(test_errors),
+            "warning_count": len(unique_warnings),
+            "warning_occurrence_count": len(test_warnings),
+            "total_issues": total_issues,
             "has_model_errors": len(errors) > 0,
             "has_test_failures": len(test_errors) > 0,
+            "has_warnings": len(test_warnings) > 0,
             "all_errors": all_errors,
+            "all_warnings": all_warnings,
             "downstream_count": downstream_counts.get(uid, 0),
             "upstream_count": upstream_counts.get(uid, 0),
             "query_count": model_query_stats.get(uid, 0),

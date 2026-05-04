@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>High Impact Config — dbt Health Check</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2218%22 fill=%22%2334d399%22/><text y=%2272%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2258%22 font-family=%22system-ui%22 font-weight=%22700%22 fill=%22white%22>H</text></svg>">
+  <style>
+    :root { --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--text-muted:#8b8fa3;--accent:#34d399;--green:#34d399;--red:#f87171;--orange:#fbbf24;--blue:#60a5fa; }
+    * { margin:0;padding:0;box-sizing:border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;background:var(--bg);color:var(--text);padding:2rem; }
+    a { color:var(--accent);text-decoration:none; } a:hover { text-decoration:underline; }
+    .tab-nav { display:flex;align-items:center;border-bottom:1px solid var(--border);margin-bottom:1.5rem; }
+    .tab { padding:0.6rem 1.25rem;font-size:0.85rem;color:var(--text-muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px; }
+    .tab:hover { color:var(--text);text-decoration:none; } .tab.active { color:var(--accent);border-bottom-color:var(--accent);font-weight:600; }
+    .tab-spacer { flex:1; } .tab-sep { width:1px;height:1.1rem;background:var(--border);margin:0 0.25rem;align-self:center; }
+    .tab-link { padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-muted);text-decoration:none; } .tab-link:hover { color:var(--accent);text-decoration:none; }
+    .tab-link.active { color:var(--accent);font-weight:600; }
+    .page-content { max-width:720px;margin:0 auto; }
+    header h1 { font-size:1.5rem;font-weight:600; } header h1 span { color:var(--accent); }
+    .subtitle { color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem; }
+    .flash { padding:0.75rem 1rem;border-radius:6px;margin-bottom:1rem;font-size:0.85rem;border:1px solid; }
+    .flash-success { background:rgba(52,211,153,0.1);border-color:rgba(52,211,153,0.3);color:var(--green); }
+    .flash-error { background:rgba(248,113,113,0.1);border-color:rgba(248,113,113,0.3);color:var(--red); }
+    .card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.25rem; }
+    .card h2 { font-size:0.95rem;font-weight:600;margin-bottom:0.5rem; }
+    .card .desc { font-size:0.82rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.5; }
+    .btn { background:var(--accent);color:#0f1117;border:none;border-radius:6px;padding:0.6rem 1.25rem;font-size:0.85rem;font-weight:600;cursor:pointer;font-family:inherit; }
+    .btn:hover { opacity:0.9; }
+    .btn-sm { font-size:0.75rem;padding:0.35rem 0.75rem; }
+    .btn-outline { background:transparent;border:1px solid var(--border);color:var(--text-muted); }
+    .btn-outline:hover { border-color:var(--text-muted);color:var(--text); }
+    .btn-red { background:transparent;border:1px solid var(--red);color:var(--red); }
+    .btn-red:hover { background:rgba(248,113,113,0.1); }
+    .radio-group { display:flex;gap:0.75rem;margin-top:0.5rem; }
+    .radio-label { display:flex;align-items:center;gap:0.4rem;font-size:0.85rem;cursor:pointer;padding:0.4rem 0.75rem;border:1px solid var(--border);border-radius:6px;transition:border-color 0.15s; }
+    .radio-label:hover { border-color:var(--text-muted); }
+    .radio-label input:checked + span { color:var(--accent);font-weight:600; }
+    .radio-label:has(input:checked) { border-color:var(--accent); }
+    input[type="range"] { width:200px;accent-color:var(--accent); }
+    .range-row { display:flex;align-items:center;gap:1rem;margin-top:0.5rem; }
+    .range-val { font-size:1rem;font-weight:600;color:var(--accent);min-width:3rem; }
+  </style>
+</head>
+<body>
+  <nav class="tab-nav">
+    <a href="/data-quality" class="tab">Data Quality</a>
+    <span class="tab-spacer"></span>
+    <span class="tab-sep"></span>
+    <a href="/config" class="tab-link active">High Impact Config</a>
+    <span class="tab-sep"></span>
+    <a href="/setup" class="tab-link">&#9881; Settings</a>
+  </nav>
+
+  <div class="page-content">
+    <header>
+      <h1><span>&#9642;</span> High Impact Configuration</h1>
+      <div class="subtitle">Define what makes a model high-impact. Changes trigger a recalculation.</div>
+    </header>
+    <div style="margin-top:1.5rem;"></div>
+
+    {% with messages = get_flashed_messages(with_categories=true) %}
+      {% for category, message in messages %}
+      <div class="flash flash-{{ category }}">{{ message }}</div>
+      {% endfor %}
+    {% endwith %}
+
+    <form action="/config/save" method="POST">
+
+      <!-- Heavy Usage Threshold -->
+      <div class="card">
+        <h2>Heavy Usage Threshold</h2>
+        <div class="desc">Models in the top N% by warehouse query count (among models with at least 1 query) are flagged as "Heavy Usage".</div>
+        <div class="range-row">
+          <span style="font-size:0.82rem;color:var(--text-muted);">Top</span>
+          <input type="range" name="heavy_usage_pct" id="pctRange" min="5" max="50" step="5" value="{{ heavy_pct }}">
+          <span class="range-val" id="pctVal">{{ heavy_pct }}%</span>
+        </div>
+      </div>
+
+      <!-- Public Model Definition -->
+      <div class="card">
+        <h2>Public Model Definition</h2>
+        <div class="desc">Choose what qualifies as a "Public Model" for high-impact status.</div>
+        <div class="radio-group">
+          <label class="radio-label">
+            <input type="radio" name="public_model_mode" value="public_with_contract" {% if public_mode == 'public_with_contract' %}checked{% endif %}>
+            <span>Public + Contract Enforced</span>
+          </label>
+          <label class="radio-label">
+            <input type="radio" name="public_model_mode" value="public_only" {% if public_mode == 'public_only' %}checked{% endif %}>
+            <span>Any Public Model <span style="font-size:0.72rem;font-weight:400;color:var(--orange);">(caution: public is the default access level — most models may qualify)</span></span>
+          </label>
+        </div>
+      </div>
+
+      <!-- High Impact Tags -->
+      <div class="card">
+        <h2>High Impact Tags</h2>
+        <div class="desc">Models with any of these tags will be flagged as "High Impact Tag".</div>
+        {% if all_tags %}
+        <div style="display:flex;gap:0.5rem;margin-bottom:0.75rem;">
+          <button type="button" class="btn btn-sm btn-outline" onclick="document.querySelectorAll('.tag-cb').forEach(function(c){c.checked=true})">Select All</button>
+          <button type="button" class="btn btn-sm btn-red" onclick="document.querySelectorAll('.tag-cb').forEach(function(c){c.checked=false})">Clear All</button>
+        </div>
+        <div style="max-height:320px;overflow-y:auto;background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.75rem;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:0.15rem 1rem;">
+          {% for tag in all_tags %}
+          <label style="display:flex;align-items:center;gap:0.5rem;padding:0.35rem 0.25rem;font-size:0.85rem;cursor:pointer;border-radius:4px;" onmouseover="this.style.background='rgba(255,255,255,0.04)'" onmouseout="this.style.background='none'">
+            <input type="checkbox" class="tag-cb" name="high_impact_tags" value="{{ tag }}" {% if tag in selected_tags %}checked{% endif %} style="accent-color:var(--accent);flex-shrink:0;">
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">{{ tag }}</span>
+          </label>
+          {% endfor %}
+        </div>
+        {% else %}
+        <div style="color:var(--text-muted);font-size:0.85rem;">No tags found. Load your data first to see available tags.</div>
+        {% endif %}
+      </div>
+
+      <div style="display:flex;align-items:center;gap:1rem;">
+        <button type="submit" class="btn">Save & Recalculate</button>
+        <span style="font-size:0.78rem;color:var(--text-muted);">{{ selected_tags | length }} tag{{ 's' if selected_tags | length != 1 else '' }} selected</span>
+      </div>
+    </form>
+  </div>
+
+<script>
+var r = document.getElementById('pctRange'), v = document.getElementById('pctVal');
+r.oninput = function() { v.textContent = r.value + '%'; };
+</script>
+</body>
+</html>

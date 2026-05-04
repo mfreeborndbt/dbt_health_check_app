@@ -53,12 +53,19 @@ class DbtClient:
 
     def admin_get(self, path, params=None):
         """GET request to the Admin API v2."""
+        import re
         url = f"https://{self.host_url}/api/v2/accounts/{self.account_id}/{path}"
         resp = self._retry_request(
             lambda: requests.get(url, params=params, headers=self.admin_headers)
         )
         resp.raise_for_status()
-        return resp.json()
+        try:
+            return resp.json()
+        except ValueError:
+            # Strip control characters that break JSON parsing
+            cleaned = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f]', '', resp.text)
+            import json
+            return json.loads(cleaned)
 
     def test_connection(self):
         """Verify connectivity."""

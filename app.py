@@ -46,6 +46,18 @@ def _preload_data_quality():
     fetch_data_quality_summary(client, days=30)
 
 
+def _invalidate_summary():
+    """Clear the summary cache so config changes take effect."""
+    from data_quality import _summary_db_key, _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
+    from cache_db import cache_delete
+    client = get_client_from_config()
+    if client:
+        key = _summary_db_key(client)
+        cache_delete(key)
+        with _SUMMARY_CACHE_LOCK:
+            _SUMMARY_CACHE.pop(key, None)
+
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -67,19 +79,7 @@ def index():
 @app.route("/setup")
 def setup():
     creds = load_credentials()
-    # Load project tags from cache if available
-    all_tags = []
-    if creds:
-        client = get_client_from_config()
-        if client:
-            from data_quality import _fetch_high_impact_signals
-            try:
-                hi_data = _fetch_high_impact_signals(client)
-                all_tags = hi_data.get("all_tags", [])
-            except Exception:
-                pass
-    selected_tags = (creds or {}).get("high_impact_tags", [])
-    return render_template("setup.html", creds=creds, all_tags=all_tags, selected_tags=selected_tags)
+    return render_template("setup.html", creds=creds)
 
 
 @app.route("/setup/save", methods=["POST"])
@@ -102,6 +102,11 @@ def setup_save():
     existing = load_credentials()
     if not data["token"] and existing:
         data["token"] = existing["token"]
+    # Preserve config settings across connection saves
+    if existing:
+        for k in ("high_impact_tags", "heavy_usage_pct", "public_model_mode"):
+            if k in existing:
+                data[k] = existing[k]
 
     if prefix:
         data["name"] = prefix
@@ -124,29 +129,6 @@ def setup_save():
         return redirect(url_for("setup"))
 
 
-@app.route("/setup/save-tags", methods=["POST"])
-def setup_save_tags():
-    creds = load_credentials()
-    if creds is None:
-        flash("Configure your connection first.", "error")
-        return redirect(url_for("setup"))
-    tags = request.form.getlist("high_impact_tags")
-    creds["high_impact_tags"] = tags
-    save_credentials(creds)
-    # Invalidate the summary cache so tags take effect
-    cache_db.close()
-    cache_dir = os.path.join(os.path.dirname(__file__), ".cache")
-    # Only clear the summary cache key, not all caches
-    from data_quality import _summary_db_key, _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
-    from cache_db import cache_delete
-    summary_key = _summary_db_key(get_client_from_config())
-    cache_delete(summary_key)
-    with _SUMMARY_CACHE_LOCK:
-        _SUMMARY_CACHE.pop(summary_key, None)
-    flash(f"High-impact tags saved ({len(tags)} selected).", "success")
-    return redirect(url_for("setup"))
-
-
 @app.route("/setup/clear")
 def setup_clear():
     if os.path.exists(CREDENTIALS_PATH):
@@ -158,6 +140,51 @@ def setup_clear():
     flash("Credentials cleared.", "success")
     return redirect(url_for("setup"))
 
+
+# ---------------------------------------------------------------------------
+# High Impact Config (separate tab)
+# ---------------------------------------------------------------------------
+
+@app.route("/config")
+def config_page():
+    creds = load_credentials()
+    if creds is None:
+        return redirect(url_for("setup"))
+    all_tags = []
+    client = get_client_from_config()
+    if client:
+        from data_quality import _fetch_high_impact_signals
+        try:
+            hi_data = _fetch_high_impact_signals(client)
+            all_tags = hi_data.get("all_tags", [])
+        except Exception:
+            pass
+    selected_tags = creds.get("high_impact_tags", [])
+    heavy_pct = creds.get("heavy_usage_pct", 20)
+    public_mode = creds.get("public_model_mode", "public_with_contract")
+    return render_template("config.html", creds=creds, all_tags=all_tags,
+                           selected_tags=selected_tags, heavy_pct=heavy_pct,
+                           public_mode=public_mode)
+
+
+@app.route("/config/save", methods=["POST"])
+def config_save():
+    creds = load_credentials()
+    if creds is None:
+        flash("Configure your connection first.", "error")
+        return redirect(url_for("setup"))
+    creds["high_impact_tags"] = request.form.getlist("high_impact_tags")
+    creds["heavy_usage_pct"] = int(request.form.get("heavy_usage_pct", 20))
+    creds["public_model_mode"] = request.form.get("public_model_mode", "public_with_contract")
+    save_credentials(creds)
+    _invalidate_summary()
+    flash("High-impact configuration saved. Data will recalculate on next load.", "success")
+    return redirect(url_for("config_page"))
+
+
+# ---------------------------------------------------------------------------
+# Loading + Data Quality
+# ---------------------------------------------------------------------------
 
 def _needs_loading():
     """Check if we should redirect to the loading page (cache is cold)."""
