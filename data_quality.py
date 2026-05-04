@@ -4,7 +4,7 @@ import threading
 from datetime import datetime, timedelta, timezone
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from discovery_client import DbtClient
+from discovery_client import DbtClient, load_credentials
 from cache_db import cache_get as db_get, cache_set as db_set, cache_exists as db_exists
 
 _AGG_TTL = 6 * 3600
@@ -18,7 +18,7 @@ _SUMMARY_CACHE_LOCK = threading.Lock()
 
 
 def _summary_db_key(client):
-    return f"dq_summary_v8:{client.account_id}:{client.project_id}:{client.environment_id}"
+    return f"dq_summary_v13:{client.account_id}:{client.project_id}:{client.environment_id}"
 
 
 def _summary_cache_get(client):
@@ -384,60 +384,67 @@ def _fetch_dependency_counts(client: DbtClient):
 
 
 # ---------------------------------------------------------------------------
-# Model query history (targeted batch via modelHistoricalRuns aliases)
+# Model query history (usageQueryCount from beta Discovery API)
 # ---------------------------------------------------------------------------
 
-def _fetch_model_query_history_batch(client: DbtClient, model_uids):
-    """Fetch execution counts for a targeted set of models via batched aliases."""
-    if not model_uids:
-        return {}
-
-    key = _cache_key("model_qhist_v3", client.account_id, client.environment_id,
-                     hashlib.md5(",".join(sorted(model_uids)).encode()).hexdigest())
+def _fetch_model_usage_query_counts(client: DbtClient):
+    """Fetch usageQueryCount for all models via the beta Discovery API."""
+    key = _cache_key("model_usage_qc_v1", client.account_id, client.environment_id)
     cached = _cache_get(key)
     if cached is not None:
         return cached
 
-    print(f"[{client.name}] Fetching query history for {len(model_uids)} models...")
-    query_counts = {}
-    batch_size = 25
-    uids = list(model_uids)
-
-    for i in range(0, len(uids), batch_size):
-        batch = uids[i:i + batch_size]
-        aliases = []
-        for j, uid in enumerate(batch):
-            safe_uid = uid.replace('"', '\\"')
-            aliases.append(
-                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 100) {{ uniqueId }}'
-            )
-        gql = (
-            "query ($environmentId: BigInt!) {\n"
-            "  environment(id: $environmentId) {\n"
-            "    applied {\n"
-            "      " + "\n      ".join(aliases) + "\n"
-            "    }\n"
-            "  }\n"
-            "}"
-        )
+    beta_url = client.discovery_url.replace("/graphql", "/beta/graphql")
+    print(f"[{client.name}] Fetching model query counts (usageQueryCount)...")
+    query = """
+    query ($environmentId: BigInt!, $first: Int!, $after: String) {
+      environment(id: $environmentId) {
+        applied {
+          models(first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            edges {
+              node {
+                uniqueId
+                usageQueryCount
+              }
+            }
+          }
+        }
+      }
+    }
+    """
+    counts = {}
+    cursor = None
+    while True:
+        variables = {"environmentId": client.environment_id, "first": 500}
+        if cursor:
+            variables["after"] = cursor
         try:
-            data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
-            applied = data["environment"]["applied"]
-            for j, uid in enumerate(batch):
-                runs = applied.get(f"m{j}") or []
-                query_counts[uid] = len(runs)
+            payload = {"query": query, "variables": variables}
+            resp = client._retry_request(
+                lambda: __import__("requests").post(beta_url, json=payload, headers=client.headers)
+            )
+            resp.raise_for_status()
+            result = resp.json()
+            if "errors" in result:
+                raise Exception(f"GraphQL errors: {result['errors']}")
+            data = result["data"]
         except Exception as e:
-            print(f"  Batch {i // batch_size} error: {e}")
-            for uid in batch:
-                query_counts[uid] = 0
+            print(f"[{client.name}] Could not fetch usageQueryCount: {e}")
+            _cache_set(key, {})
+            return {}
+        models_data = data["environment"]["applied"]["models"]
+        for edge in models_data["edges"]:
+            node = edge["node"]
+            uid = node["uniqueId"]
+            counts[uid] = node.get("usageQueryCount") or 0
+        if not models_data["pageInfo"]["hasNextPage"]:
+            break
+        cursor = models_data["pageInfo"]["endCursor"]
 
-        done = min(i + batch_size, len(uids))
-        if done < len(uids):
-            print(f"  Fetched {done}/{len(uids)} models...")
-
-    _cache_set(key, query_counts)
-    print(f"[{client.name}] Fetched query history for {len(query_counts)} models")
-    return query_counts
+    _cache_set(key, counts)
+    print(f"[{client.name}] Fetched query counts for {len(counts)} models")
+    return counts
 
 
 # ---------------------------------------------------------------------------
@@ -497,59 +504,142 @@ def _fetch_test_compiled_code(client: DbtClient):
 
 
 # ---------------------------------------------------------------------------
-# Semantic model references
+# High-impact signals: semantic models, exposures, public access
 # ---------------------------------------------------------------------------
 
-def _fetch_semantic_model_refs(client: DbtClient):
-    """Return set of model unique_ids connected to semantic models."""
-    key = _cache_key("semantic_refs_v1", client.account_id, client.environment_id)
+def _fetch_high_impact_signals(client: DbtClient):
+    """Fetch semantic model refs, exposure refs, and public models.
+    Returns dict: {uid: set of reason tags}."""
+    key = _cache_key("hi_signals_v5", client.account_id, client.environment_id)
     cached = _cache_get(key)
-    if cached is not None:
-        return set(cached)
+    if cached is not None and isinstance(cached, dict) and "signals" in cached:
+        return cached
 
+    signals = defaultdict(set)  # uid -> set of reason strings
+
+    # --- Semantic models ---
     print(f"[{client.name}] Fetching semantic models...")
-    query = """
+    query_sm = """
     query ($environmentId: BigInt!, $first: Int!, $after: String) {
       environment(id: $environmentId) {
         applied {
           semanticModels(first: $first, after: $after) {
             pageInfo { hasNextPage endCursor }
-            edges {
-              node {
-                uniqueId
-                dependsOn
-              }
-            }
+            edges { node { uniqueId dependsOn } }
           }
         }
       }
     }
     """
-    refs = set()
     cursor = None
     while True:
         variables = {"environmentId": client.environment_id, "first": 500}
         if cursor:
             variables["after"] = cursor
         try:
-            data = client.query_discovery(query, variables=variables)
+            data = client.query_discovery(query_sm, variables=variables)
         except Exception as e:
             print(f"[{client.name}] Could not fetch semantic models: {e}")
-            _cache_set(key, [])
-            return set()
+            break
         sm_data = data["environment"]["applied"]["semanticModels"]
         for edge in sm_data["edges"]:
-            node = edge["node"]
-            for dep in (node.get("dependsOn") or []):
+            for dep in (edge["node"].get("dependsOn") or []):
                 if dep.startswith("model."):
-                    refs.add(dep)
+                    signals[dep].add("Semantic Model")
         if not sm_data["pageInfo"]["hasNextPage"]:
             break
         cursor = sm_data["pageInfo"]["endCursor"]
 
-    _cache_set(key, list(refs))
-    print(f"[{client.name}] Found {len(refs)} models connected to semantic models")
-    return refs
+    # --- Exposures ---
+    print(f"[{client.name}] Fetching exposures...")
+    query_exp = """
+    query ($environmentId: BigInt!, $first: Int!, $after: String) {
+      environment(id: $environmentId) {
+        applied {
+          exposures(first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            edges { node { uniqueId parents { uniqueId resourceType } } }
+          }
+        }
+      }
+    }
+    """
+    cursor = None
+    while True:
+        variables = {"environmentId": client.environment_id, "first": 500}
+        if cursor:
+            variables["after"] = cursor
+        try:
+            data = client.query_discovery(query_exp, variables=variables)
+        except Exception as e:
+            print(f"[{client.name}] Could not fetch exposures: {e}")
+            break
+        exp_data = data["environment"]["applied"]["exposures"]
+        for edge in exp_data["edges"]:
+            for p in (edge["node"].get("parents") or []):
+                if p.get("resourceType") == "model":
+                    signals[p["uniqueId"]].add("Dependent Exposure")
+        if not exp_data["pageInfo"]["hasNextPage"]:
+            break
+        cursor = exp_data["pageInfo"]["endCursor"]
+
+    # --- Public models + contract enforced + tags ---
+    print(f"[{client.name}] Fetching model access, contracts, and tags...")
+    query_pub = """
+    query ($environmentId: BigInt!, $first: Int!, $after: String) {
+      environment(id: $environmentId) {
+        applied {
+          models(first: $first, after: $after) {
+            pageInfo { hasNextPage endCursor }
+            edges { node { uniqueId access contractEnforced tags } }
+          }
+        }
+      }
+    }
+    """
+    all_tags = set()
+    model_tags_map = {}  # uid -> list of tags
+    cursor = None
+    while True:
+        variables = {"environmentId": client.environment_id, "first": 500}
+        if cursor:
+            variables["after"] = cursor
+        try:
+            data = client.query_discovery(query_pub, variables=variables)
+        except Exception as e:
+            print(f"[{client.name}] Could not fetch model access: {e}")
+            break
+        models_data = data["environment"]["applied"]["models"]
+        for edge in models_data["edges"]:
+            node = edge["node"]
+            uid = node["uniqueId"]
+            # Only count as "Public Model" if contract is also enforced,
+            # since public is the default access level in dbt
+            if node.get("access") == "public" and node.get("contractEnforced"):
+                signals[uid].add("Public Model")
+            if node.get("contractEnforced"):
+                signals[uid].add("Contract Enforced")
+            tags = node.get("tags") or []
+            if tags:
+                all_tags.update(tags)
+                model_tags_map[uid] = tags
+        if not models_data["pageInfo"]["hasNextPage"]:
+            break
+        cursor = models_data["pageInfo"]["endCursor"]
+
+    sm_count = sum(1 for r in signals.values() if "Semantic Model" in r)
+    exp_count = sum(1 for r in signals.values() if "Dependent Exposure" in r)
+    pub_count = sum(1 for r in signals.values() if "Public Model" in r)
+    ce_count = sum(1 for r in signals.values() if "Contract Enforced" in r)
+    print(f"[{client.name}] High-impact signals: {sm_count} semantic, {exp_count} exposure, {pub_count} public, {ce_count} contract")
+
+    result = {
+        "signals": {uid: list(reasons) for uid, reasons in signals.items()},
+        "all_tags": sorted(all_tags),
+        "model_tags": model_tags_map,
+    }
+    _cache_set(key, result)
+    return result
 
 
 # ---------------------------------------------------------------------------
@@ -584,9 +674,23 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
     # Fetch downstream + upstream counts (BFS transitive) and adjacency
     downstream_counts, upstream_counts, children_of = _fetch_dependency_counts(client)
 
-    # Fetch semantic model refs and test compiled SQL from Discovery API
-    semantic_model_refs = _fetch_semantic_model_refs(client)
+    # Fetch model query counts, high-impact signals, and test compiled SQL
+    model_query_stats = _fetch_model_usage_query_counts(client)
+    hi_data = _fetch_high_impact_signals(client)
+    raw_signals = hi_data.get("signals", {}) if isinstance(hi_data, dict) and "signals" in hi_data else {}
+    hi_signals = {uid: set(reasons) for uid, reasons in raw_signals.items()}
+    all_project_tags = hi_data.get("all_tags", []) if isinstance(hi_data, dict) else []
+    model_tags_map = hi_data.get("model_tags", {}) if isinstance(hi_data, dict) else {}
     test_compiled_sql = _fetch_test_compiled_code(client)
+
+    # Apply high-impact tags from user config
+    hi_tag_set = set((load_credentials() or {}).get("high_impact_tags") or [])
+    if hi_tag_set:
+        for uid, tags in model_tags_map.items():
+            if hi_tag_set & set(tags):
+                if uid not in hi_signals:
+                    hi_signals[uid] = set()
+                hi_signals[uid].add("High Impact Tag")
 
     # Fetch details for failed runs (parallel)
     failed_run_details = {}
@@ -815,57 +919,42 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
                             })
 
     # -----------------------------------------------------------------------
-    # Query history + high impact (targeted to failed models + downstream)
+    # High impact reasons per model
     # -----------------------------------------------------------------------
-    failed_uids = set(model_entries.keys())
-    # Collect transitive downstream UIDs for all failed models
-    relevant_uids = set(failed_uids)
-    for uid in failed_uids:
-        visited = set()
-        queue = list(children_of.get(uid, []))
-        while queue:
-            node = queue.pop(0)
-            if node in visited or node == uid:
-                continue
-            visited.add(node)
-            queue.extend(children_of.get(node, []))
-        relevant_uids |= visited
-
-    model_query_stats = _fetch_model_query_history_batch(client, relevant_uids)
-
-    # Compute high-impact set: top 10% by query count OR connected to semantic model
+    # Top 20% by query count = "Heavy Usage"
     nonzero_counts = sorted([c for c in model_query_stats.values() if c > 0], reverse=True)
     if nonzero_counts:
-        threshold_idx = max(1, len(nonzero_counts) // 10)
+        threshold_idx = max(1, len(nonzero_counts) // 5)  # top 20%
         query_threshold = nonzero_counts[threshold_idx - 1]
     else:
         query_threshold = float('inf')
 
-    high_impact_set = set()
+    # Build per-model reason sets (merge signal reasons + heavy usage)
+    model_hi_reasons = defaultdict(set)
+    for uid, reasons in hi_signals.items():
+        model_hi_reasons[uid] |= reasons
     for uid, qc in model_query_stats.items():
-        if (qc > 0 and qc >= query_threshold) or uid in semantic_model_refs:
-            high_impact_set.add(uid)
-    high_impact_set |= semantic_model_refs
+        if qc > 0 and qc >= query_threshold:
+            model_hi_reasons[uid].add("Heavy Usage")
 
-    # Compute downstream query counts and high-impact downstream for failed models
-    downstream_query_counts = {}
-    high_impact_downstream = {}
-    for uid in failed_uids:
+    # The set of ALL high-impact model UIDs across the entire project
+    all_high_impact_uids = set(uid for uid, r in model_hi_reasons.items() if r)
+
+    # Compute high_impact_downstream_count per failed model
+    hi_downstream_counts = {}
+    for uid in model_entries:
         visited = set()
         queue = list(children_of.get(uid, []))
-        dq_total = 0
-        has_hi = False
+        count = 0
         while queue:
             node = queue.pop(0)
             if node in visited or node == uid:
                 continue
             visited.add(node)
-            dq_total += model_query_stats.get(node, 0)
-            if node in high_impact_set:
-                has_hi = True
+            if node in all_high_impact_uids:
+                count += 1
             queue.extend(children_of.get(node, []))
-        downstream_query_counts[uid] = dq_total
-        high_impact_downstream[uid] = has_hi
+        hi_downstream_counts[uid] = count
 
     # Build final list
     failed_models = []
@@ -894,6 +983,7 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
             all_errors.append({**te, "source": "test"})
         all_errors.sort(key=lambda e: (e["date"], e["time"]), reverse=True)
 
+        reasons = sorted(model_hi_reasons.get(uid, set()))
         failed_models.append({
             "unique_id": uid,
             "name": name,
@@ -906,9 +996,9 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
             "downstream_count": downstream_counts.get(uid, 0),
             "upstream_count": upstream_counts.get(uid, 0),
             "query_count": model_query_stats.get(uid, 0),
-            "downstream_query_count": downstream_query_counts.get(uid, 0),
-            "is_high_impact": uid in high_impact_set,
-            "is_high_impact_downstream": high_impact_downstream.get(uid, False),
+            "is_high_impact": len(reasons) > 0,
+            "high_impact_reasons": reasons,
+            "hi_downstream_count": hi_downstream_counts.get(uid, 0),
             "failure_dates": sorted(failure_dates),
         })
 
@@ -944,6 +1034,7 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
         "day_job_breakdown": day_job_breakdown,
         "date_job_ids": date_job_ids,
         "job_date_runs": job_date_runs_serialized,
+        "all_project_tags": all_project_tags,
     }
 
     _summary_cache_set(client, result)

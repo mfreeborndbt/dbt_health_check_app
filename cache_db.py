@@ -108,6 +108,18 @@ def cache_exists(key, ttl=None):
     return True
 
 
+def cache_delete(key):
+    with _lock:
+        _mem_cache.pop(key, None)
+        conn = _get_conn()
+        if conn is None:
+            return
+        try:
+            conn.execute("DELETE FROM kv_cache WHERE key = ?", [key])
+        except Exception:
+            pass
+
+
 def cache_clear():
     with _lock:
         _mem_cache.clear()
