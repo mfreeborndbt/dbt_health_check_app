@@ -8,6 +8,8 @@ Local dashboard that connects to **dbt Cloud** (Discovery + Admin APIs) and summ
 
 Copy and paste **one** of the blocks below (pick your OS), then open the URL shown in the terminal (your browser may open automatically).
 
+If you **already cloned** the repo, skip `git clone` and run `cd dbt_health_check_app` then `git pull` to update.
+
 ### macOS / Linux
 
 ```bash
@@ -33,7 +35,7 @@ python run.py
 
 Or double-click `run.bat` after opening a terminal in this folder.
 
-**What happens:** the first run creates a `.venv` folder here, installs packages from `requirements.txt`, optionally fast-forwards `main` if you are behind `origin`, and starts the app at **http://127.0.0.1:5556** (by default).
+**What happens:** the first run creates a `.venv` folder here, installs packages from `requirements.txt`, optionally fast-forwards `main` if you are behind `origin`, and starts the app at **http://127.0.0.1:5556** by default. If **5556 is already in use** (for example a previous run still open), the launcher picks the **next free port** (5557, 5558, …) and tells you in the terminal.
 
 | Option | Example |
 |--------|---------|
@@ -63,7 +65,14 @@ Credentials are stored only in `config/credentials.json` (the whole `config/` di
 
 ## Stopping the app
 
-Press **Ctrl+C** in the terminal.
+Press **Ctrl+C** in the terminal. If you start the app again while an old process is still bound to **5556**, either stop the old process or use the next port the launcher prints (or run `python run.py --port 18080`).
+
+## Troubleshooting
+
+| Issue | What to do |
+|-------|------------|
+| `fatal: destination path ... already exists` | You already have the repo. Run `cd dbt_health_check_app` and `git pull`, then `python run.py` (no second clone). |
+| `Address already in use` / port busy | Use a new pull of `main`: the launcher auto-picks a free port. Or stop the other process, or run `python run.py --port 18080`. |
 
 ## Screenshot
 

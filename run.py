@@ -6,7 +6,7 @@ Creates a local virtual environment, installs dependencies from requirements.txt
 and starts the Flask app. Works on macOS, Linux, and Windows (Python 3.8+).
 
 Usage:
-    python run.py                  # default http://127.0.0.1:5556
+    python run.py                  # default http://127.0.0.1:5556 (or next free port)
     python run.py --port 8080
     python run.py --host 0.0.0.0   # listen on all interfaces (e.g. Docker)
     python run.py --no-update      # skip optional git fetch / pull
@@ -15,6 +15,7 @@ Usage:
 import argparse
 import os
 import platform
+import socket
 import subprocess
 import sys
 import threading
@@ -30,6 +31,40 @@ REPO_REMOTE = "origin"
 REPO_BRANCH = "main"
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
+
+
+def _bind_probe_addr(host):
+    """Use loopback to probe port availability when binding to all interfaces."""
+    if host in ("0.0.0.0", "", None):
+        return "127.0.0.1"
+    return host
+
+
+def port_is_available(host, port):
+    """True if nothing appears to be listening on this TCP port for our bind mode."""
+    addr = _bind_probe_addr(host)
+    try:
+        with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+            s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+            s.bind((addr, port))
+    except OSError:
+        return False
+    return True
+
+
+def resolve_listen_port(host, preferred, span=64):
+    """Return preferred, or the next free port in [preferred, preferred + span)."""
+    for offset in range(span):
+        p = preferred + offset
+        if p > 65535:
+            break
+        if port_is_available(host, p):
+            return p
+    sys.exit(
+        f"Error: No free TCP port found starting at {preferred}. "
+        "Stop other programs using those ports, or run with a high port, e.g. "
+        "`python run.py --port 18080`."
+    )
 
 
 def check_python_version():
@@ -184,27 +219,50 @@ def main():
     install_deps(py)
 
     commit = get_local_commit()
-    url = browser_url(args.host, args.port)
     print()
     print("  dbt Health Check")
     print(f"  Version: {commit}")
     print("  ------------------------------------")
     if not args.no_update:
         check_for_updates()
+
+    port = resolve_listen_port(args.host, args.port)
+    if port != args.port:
+        print(f"  Note: Port {args.port} is already in use; using port {port} instead.")
+        print("  (Stop the other app or pass --port to choose a specific free port.)\n")
+
+    url = browser_url(args.host, port)
     print(f"  Running at: {url}")
     print("  Stop with:  Ctrl+C")
     print("  (Use --no-update to skip update check)")
     print()
 
-    threading.Thread(target=open_browser, args=(args.host, args.port), daemon=True).start()
+    threading.Thread(target=open_browser, args=(args.host, port), daemon=True).start()
 
     app_py = os.path.join(ROOT, "app.py")
+    r = None
     try:
-        subprocess.check_call(
-            [py, app_py, "--host", args.host, "--port", str(args.port)],
+        r = subprocess.run(
+            [py, app_py, "--host", args.host, "--port", str(port)],
+            check=False,
         )
     except KeyboardInterrupt:
         print("\nShutting down.")
+        return
+
+    if r is None:
+        return
+    if r.returncode == 0:
+        return
+    # Child killed by a signal (e.g. SIGINT) — exit quietly without a scary traceback
+    if r.returncode < 0:
+        return
+    print(
+        f"\nError: The app stopped with exit code {r.returncode}. "
+        "See the messages above (often a missing dependency or import error).",
+        file=sys.stderr,
+    )
+    sys.exit(r.returncode)
 
 
 if __name__ == "__main__":
