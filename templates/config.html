@@ -94,6 +94,24 @@
         </div>
       </div>
 
+      <!-- Optional discovery signals -->
+      <div class="card">
+        <h2>Semantic Models &amp; Exposures</h2>
+        <div class="desc">These discovery-based signals mark upstream models as high impact. Turn them off if you want high impact to reflect only contracts, public access, tags, and heavy usage.</div>
+        <div style="display:flex;flex-direction:column;gap:0.65rem;margin-top:0.5rem;">
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="hidden" name="high_impact_include_semantic_models" value="0">
+            <input type="checkbox" name="high_impact_include_semantic_models" value="1" {% if include_semantic %}checked{% endif %} style="accent-color:var(--accent);width:16px;height:16px;">
+            <span>Count <strong>semantic model</strong> parents as high impact</span>
+          </label>
+          <label style="display:flex;align-items:center;gap:0.5rem;font-size:0.85rem;cursor:pointer;">
+            <input type="hidden" name="high_impact_include_exposure_dependents" value="0">
+            <input type="checkbox" name="high_impact_include_exposure_dependents" value="1" {% if include_exposure %}checked{% endif %} style="accent-color:var(--accent);width:16px;height:16px;">
+            <span>Count <strong>exposure dependents</strong> as high impact</span>
+          </label>
+        </div>
+      </div>
+
       <!-- High Impact Tags -->
       <div class="card">
         <h2>High Impact Tags</h2>

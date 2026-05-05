@@ -6,14 +6,20 @@ import statistics
 from collections import defaultdict
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from discovery_client import DbtClient, load_credentials
-from cache_db import cache_get as db_get, cache_set as db_set
+from cache_db import cache_get as db_get, cache_set as db_set, cache_delete as db_delete
 
 _API_TTL = 6 * 3600
 
 
+def invalidate_project_health_summary(client):
+    """Drop cached project health aggregate (e.g. after high-impact config changes)."""
+    key = _cache_key("ph_summary_v9", client.account_id, client.environment_id)
+    db_delete(f"api:{key}")
+
+
 def is_project_health_cached(client):
     """Check if project health data is cached."""
-    key = _cache_key("ph_summary_v5", client.account_id, client.environment_id)
+    key = _cache_key("ph_summary_v9", client.account_id, client.environment_id)
     return db_get(f"api:{key}", ttl=_API_TTL) is not None
 
 
@@ -28,7 +34,7 @@ def _cache_key(prefix, *args):
 
 def _fetch_all_models(client: DbtClient):
     """Fetch all model metadata needed for project health checks."""
-    key = _cache_key("ph_models_v2", client.account_id, client.environment_id)
+    key = _cache_key("ph_models_v3", client.account_id, client.environment_id)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         return cached
@@ -55,6 +61,7 @@ def _fetch_all_models(client: DbtClient):
                 parents { uniqueId resourceType }
                 children { uniqueId resourceType }
                 tests { uniqueId name columnName }
+                catalog { columns { name description } }
               }
             }
           }
@@ -176,11 +183,17 @@ def _fetch_all_exposures(client: DbtClient):
 
 
 def _fetch_model_run_times(client: DbtClient, model_uids):
-    """Fetch execution times for models using batched modelHistoricalRuns aliases."""
-    key = _cache_key("ph_runtimes_v1", client.account_id, client.environment_id)
+    """Fetch execution times for models using batched modelHistoricalRuns aliases.
+
+    Fetches up to 200 recent runs, then filters to only those within the last 30 days.
+    """
+    key = _cache_key("ph_runtimes_v3", client.account_id, client.environment_id)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         return cached
+
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
     print(f"[{client.name}] Fetching model run times for {len(model_uids)} models...")
     run_times = {}
@@ -193,7 +206,7 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
         for j, uid in enumerate(batch):
             safe_uid = uid.replace('"', '\\"')
             aliases.append(
-                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 30) {{ uniqueId executionTime status }}'
+                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 200) {{ uniqueId executionTime status executeCompletedAt }}'
             )
         gql = (
             "query ($environmentId: BigInt!) {\n"
@@ -209,8 +222,19 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
             applied = data["environment"]["applied"]
             for j, uid in enumerate(batch):
                 runs = applied.get(f"m{j}") or []
-                times = [r["executionTime"] for r in runs
-                         if r.get("status") == "success" and r.get("executionTime") and r["executionTime"] > 0]
+                times = []
+                for r in runs:
+                    if r.get("status") != "success" or not r.get("executionTime") or r["executionTime"] <= 0:
+                        continue
+                    completed = r.get("executeCompletedAt") or ""
+                    if completed:
+                        try:
+                            dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                            if dt < cutoff:
+                                continue
+                        except (ValueError, TypeError):
+                            pass
+                    times.append(r["executionTime"])
                 run_times[uid] = times
         except Exception as e:
             print(f"  Batch {i // batch_size} error: {e}")
@@ -369,6 +393,37 @@ def _evaluate_testing_rules(model):
             has_pk = True
     results["primary_key_test"] = has_pk
 
+    # Test type counts
+    generic_types = {"unique", "not_null", "accepted_values", "relationships"}
+    unique_count = 0
+    not_null_count = 0
+    accepted_values_count = 0
+    relationship_count = 0
+    non_generic_count = 0
+    for tn in test_names:
+        if "unique" in tn and "combination" not in tn:
+            unique_count += 1
+        elif "not_null" in tn:
+            not_null_count += 1
+        elif "accepted_values" in tn:
+            accepted_values_count += 1
+        elif "relationships" in tn or "relationship" in tn:
+            relationship_count += 1
+        else:
+            non_generic_count += 1
+
+    results["total_test_count"] = unique_count + not_null_count + accepted_values_count + relationship_count + non_generic_count
+    results["unique_test_count"] = unique_count
+    results["not_null_test_count"] = not_null_count
+    results["accepted_values_test_count"] = accepted_values_count
+    results["relationship_test_count"] = relationship_count
+    results["non_generic_test_count"] = non_generic_count
+
+    # Column count from catalog
+    catalog = model.get("catalog") or {}
+    columns = catalog.get("columns") or []
+    results["column_count"] = len(columns)
+
     return results
 
 
@@ -377,6 +432,19 @@ def _evaluate_documentation_rules(model):
     results = {}
     desc = (model.get("description") or "").strip()
     results["has_description"] = len(desc) > 0
+
+    # Column documentation
+    columns = []
+    catalog = model.get("catalog") or {}
+    if catalog:
+        columns = catalog.get("columns") or []
+    total_cols = len(columns)
+    documented_cols = sum(1 for c in columns if (c.get("description") or "").strip())
+    results["columns_total"] = total_cols
+    results["columns_documented"] = documented_cols
+    results["columns_undocumented"] = total_cols - documented_cols
+    results["column_doc_pct"] = round(documented_cols / total_cols * 100) if total_cols > 0 else None
+
     return results
 
 
@@ -399,7 +467,7 @@ def _evaluate_governance_rules(model):
 
 def fetch_project_health(client: DbtClient):
     """Build the project health summary."""
-    key = _cache_key("ph_summary_v5", client.account_id, client.environment_id)
+    key = _cache_key("ph_summary_v9", client.account_id, client.environment_id)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         print(f"[{client.name}] Serving project health from cache")
@@ -420,7 +488,12 @@ def fetch_project_health(client: DbtClient):
                 source_children[s["uniqueId"]].append(c["uniqueId"])
 
     # High impact signals (reuse from data_quality)
-    from data_quality import _fetch_high_impact_signals, _fetch_model_usage_query_counts
+    from data_quality import (
+        _fetch_high_impact_signals,
+        _fetch_model_usage_query_counts,
+        _fetch_dependency_counts,
+        _strip_optional_hi_signals,
+    )
     hi_data = _fetch_high_impact_signals(client)
     raw_signals = hi_data.get("signals", {}) if isinstance(hi_data, dict) and "signals" in hi_data else {}
     hi_signals = {uid: set(reasons) for uid, reasons in raw_signals.items()}
@@ -443,6 +516,8 @@ def fetch_project_health(client: DbtClient):
             if hi_tag_set & set(tags):
                 hi_signals.setdefault(uid, set()).add("High Impact Tag")
 
+    _strip_optional_hi_signals(hi_signals, creds)
+
     model_query_stats = _fetch_model_usage_query_counts(client)
     heavy_pct = creds.get("heavy_usage_pct", 20)
     nonzero = sorted([c for c in model_query_stats.values() if c > 0], reverse=True)
@@ -455,6 +530,9 @@ def fetch_project_health(client: DbtClient):
         if qc > 0 and qc >= query_threshold:
             model_hi_reasons[uid].add("Heavy Usage")
 
+    # Fetch dependency graph for hi_downstream_count
+    downstream_counts, upstream_counts, children_of = _fetch_dependency_counts(client)
+
     # Exposure parent lookup
     exposure_parents = set()
     for exp in exposures:
@@ -465,6 +543,24 @@ def fetch_project_health(client: DbtClient):
     # Fetch run times (batched)
     print(f"[{client.name}] Fetching model run times...")
     run_times = _fetch_model_run_times(client, [m["uniqueId"] for m in models])
+
+    # Compute high-impact downstream count per model via BFS
+    all_high_impact_uids = set(uid for uid, r in model_hi_reasons.items() if r)
+    hi_downstream_counts = {}
+    for m in models:
+        uid = m["uniqueId"]
+        visited = set()
+        queue = list(children_of.get(uid, []))
+        count = 0
+        while queue:
+            node = queue.pop(0)
+            if node in visited or node == uid:
+                continue
+            visited.add(node)
+            if node in all_high_impact_uids:
+                count += 1
+            queue.extend(children_of.get(node, []))
+        hi_downstream_counts[uid] = count
 
     # Build per-model results
     print(f"[{client.name}] Evaluating {len(models)} models...")
@@ -505,9 +601,11 @@ def fetch_project_health(client: DbtClient):
             "subsubfolder": subsubfolder,
             "layer": layer,
             "materialization": m.get("materializedType") or "",
+            "run_count": len(times),
             "performance": perf,
             "is_high_impact": is_hi,
             "high_impact_reasons": reasons,
+            "hi_downstream_count": hi_downstream_counts.get(uid, 0),
             "modeling": modeling,
             "testing": testing,
             "documentation": documentation,

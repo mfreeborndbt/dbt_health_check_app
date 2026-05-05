@@ -143,8 +143,9 @@
           <th class="sortable" data-col="3" data-type="num">Succeeded</th>
           <th class="sortable" data-col="4" data-type="num">Failed</th>
           <th class="sortable" data-col="5" data-type="num">Cancelled</th>
-          <th class="sortable" data-col="6" data-type="num">Avg Models (Success)</th>
-          <th class="sortable" data-col="7" data-type="num">Avg Skipped (Failed)</th>
+          <th class="sortable" data-col="6" data-type="num">P80 Models (Success)</th>
+          <th class="sortable" data-col="7" data-type="num">P80 Duration (Success)</th>
+          <th class="sortable" data-col="8" data-type="num">P80 Skipped (Failed)</th>
         </tr></thead>
         <tbody>
           {% for job in summary.job_success_rates %}
@@ -160,8 +161,9 @@
             <td class="jc-success" data-base="{{ job.successful_runs }}" data-val="{{ job.successful_runs }}" style="color:var(--green);">{{ job.successful_runs }}</td>
             <td class="jc-failed" data-base="{{ job.failed_runs }}" data-val="{{ job.failed_runs }}" style="color:{% if job.failed_runs > 0 %}var(--red){% else %}var(--text-muted){% endif %};">{{ job.failed_runs }}</td>
             <td class="jc-cancelled" data-base="{{ job.cancelled_runs }}" data-val="{{ job.cancelled_runs }}" style="color:var(--text-muted);">{{ job.cancelled_runs }}</td>
-            <td data-val="{{ job.avg_models_success if job.avg_models_success is not none else -1 }}">{% if job.avg_models_success is not none %}{{ job.avg_models_success }}{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
-            <td data-val="{{ job.avg_skipped_failed if job.avg_skipped_failed is not none else -1 }}">{% if job.avg_skipped_failed is not none %}<span style="color:var(--orange);">{{ job.avg_skipped_failed }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ job.p80_models_success if job.p80_models_success is not none else -1 }}">{% if job.p80_models_success is not none %}{{ job.p80_models_success }}{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ job.p80_duration_success if job.p80_duration_success is not none else -1 }}">{% if job.p80_duration_success is not none %}{{ fmtTime(job.p80_duration_success) }}{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
+            <td data-val="{{ job.p80_skipped_failed if job.p80_skipped_failed is not none else -1 }}">{% if job.p80_skipped_failed is not none %}<span style="color:var(--orange);">{{ job.p80_skipped_failed }}</span>{% else %}<span class="muted-num">&mdash;</span>{% endif %}</td>
           </tr>
           {% endfor %}
         </tbody>
