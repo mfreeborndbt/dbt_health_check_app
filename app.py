@@ -364,6 +364,11 @@ def data_quality():
 if __name__ == "__main__":
     import argparse
     parser = argparse.ArgumentParser()
+    parser.add_argument(
+        "--host",
+        default=os.environ.get("FLASK_HOST", "127.0.0.1"),
+        help="Bind address (default: 127.0.0.1; use 0.0.0.0 for Docker/WSL port forwarding)",
+    )
     parser.add_argument("--port", type=int, default=5556)
     args = parser.parse_args()
-    app.run(port=args.port, use_reloader=False, threaded=True)
+    app.run(host=args.host, port=args.port, use_reloader=False, threaded=True)
