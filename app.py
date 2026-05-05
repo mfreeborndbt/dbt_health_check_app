@@ -76,12 +76,14 @@ def _invalidate_summary():
     """Clear the summary cache so config changes take effect."""
     from data_quality import _summary_db_key, _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
     from cache_db import cache_delete
+    from project_health import invalidate_project_health_summary
     client = get_client_from_config()
     if client:
         key = _summary_db_key(client)
         cache_delete(key)
         with _SUMMARY_CACHE_LOCK:
             _SUMMARY_CACHE.pop(key, None)
+        invalidate_project_health_summary(client)
 
 
 # ---------------------------------------------------------------------------
@@ -130,7 +132,13 @@ def setup_save():
         data["token"] = existing["token"]
     # Preserve config settings across connection saves
     if existing:
-        for k in ("high_impact_tags", "heavy_usage_pct", "public_model_mode"):
+        for k in (
+            "high_impact_tags",
+            "heavy_usage_pct",
+            "public_model_mode",
+            "high_impact_include_semantic_models",
+            "high_impact_include_exposure_dependents",
+        ):
             if k in existing:
                 data[k] = existing[k]
 
@@ -188,9 +196,18 @@ def config_page():
     selected_tags = creds.get("high_impact_tags", [])
     heavy_pct = creds.get("heavy_usage_pct", 20)
     public_mode = creds.get("public_model_mode", "public_with_contract")
-    return render_template("config.html", creds=creds, all_tags=all_tags,
-                           selected_tags=selected_tags, heavy_pct=heavy_pct,
-                           public_mode=public_mode)
+    include_semantic = creds.get("high_impact_include_semantic_models", True)
+    include_exposure = creds.get("high_impact_include_exposure_dependents", True)
+    return render_template(
+        "config.html",
+        creds=creds,
+        all_tags=all_tags,
+        selected_tags=selected_tags,
+        heavy_pct=heavy_pct,
+        public_mode=public_mode,
+        include_semantic=include_semantic,
+        include_exposure=include_exposure,
+    )
 
 
 @app.route("/config/save", methods=["POST"])
@@ -202,6 +219,12 @@ def config_save():
     creds["high_impact_tags"] = request.form.getlist("high_impact_tags")
     creds["heavy_usage_pct"] = int(request.form.get("heavy_usage_pct", 20))
     creds["public_model_mode"] = request.form.get("public_model_mode", "public_with_contract")
+    creds["high_impact_include_semantic_models"] = "1" in request.form.getlist(
+        "high_impact_include_semantic_models"
+    )
+    creds["high_impact_include_exposure_dependents"] = "1" in request.form.getlist(
+        "high_impact_include_exposure_dependents"
+    )
     save_credentials(creds)
     _invalidate_summary()
     flash("High-impact configuration saved. Data will recalculate on next load.", "success")

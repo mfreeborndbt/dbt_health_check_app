@@ -18,7 +18,7 @@ _SUMMARY_CACHE_LOCK = threading.Lock()
 
 
 def _summary_db_key(client):
-    return f"dq_summary_v21:{client.account_id}:{client.project_id}:{client.environment_id}"
+    return f"dq_summary_v24:{client.account_id}:{client.project_id}:{client.environment_id}"
 
 
 def _summary_cache_get(client):
@@ -138,7 +138,7 @@ def _fetch_runs(client: DbtClient, days=30):
 
 def _fetch_single_run_details(client, job_id, run_id):
     """Fetch model/test details for a single run."""
-    key = _cache_key("run_details_v3", client.environment_id, job_id, run_id)
+    key = _cache_key("run_details_v4", client.environment_id, job_id, run_id)
     cached = _cache_get(key)
     if cached is not None:
         return run_id, cached
@@ -172,7 +172,7 @@ def _fetch_single_run_details(client, job_id, run_id):
         result = {
             "models": models,
             "tests": tests,
-            "total_model_count": len(models),
+            "total_model_count": sum(1 for m in models if m.get("status") == "success"),
             "skipped_model_count": sum(1 for m in models if m.get("status") == "skipped"),
             "error_model_count": sum(1 for m in models if m.get("status") in ("error", "fail")),
         }
@@ -191,7 +191,7 @@ def _fetch_all_run_details_parallel(client, runs, max_workers=8, label=""):
     for run in runs:
         run_id = run["id"]
         job_id = run["job_definition_id"]
-        key = _cache_key("run_details_v3", client.environment_id, job_id, run_id)
+        key = _cache_key("run_details_v4", client.environment_id, job_id, run_id)
         cached = _cache_get(key)
         if cached is not None:
             results[run_id] = cached
@@ -653,6 +653,28 @@ def _fetch_high_impact_signals(client: DbtClient):
     return result
 
 
+def _strip_optional_hi_signals(hi_signals, creds):
+    """Remove semantic-model and exposure-dependent reasons when disabled in creds (both on by default)."""
+    if creds.get("high_impact_include_semantic_models", True) and creds.get(
+        "high_impact_include_exposure_dependents", True
+    ):
+        return
+    drop = set()
+    if not creds.get("high_impact_include_semantic_models", True):
+        drop.add("Semantic Model")
+    if not creds.get("high_impact_include_exposure_dependents", True):
+        drop.add("Dependent Exposure")
+    for uid in list(hi_signals.keys()):
+        reasons = hi_signals[uid]
+        if not isinstance(reasons, set):
+            continue
+        reasons -= drop
+        if reasons:
+            hi_signals[uid] = reasons
+        else:
+            del hi_signals[uid]
+
+
 # ---------------------------------------------------------------------------
 # Main summary builder
 # ---------------------------------------------------------------------------
@@ -741,6 +763,8 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
             if hi_tag_set & set(tags):
                 hi_signals.setdefault(uid, set()).add("High Impact Tag")
 
+    _strip_optional_hi_signals(hi_signals, creds)
+
     # Fetch details for failed runs (parallel)
     failed_run_details = {}
     if failed_runs:
@@ -781,21 +805,52 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
         elif r["status"] == 30:
             job_run_counts[jid]["cancelled"] += 1
 
-    job_avg_models_success = {}
+    def _parse_duration(dur_str):
+        """Parse HH:MM:SS or MM:SS to seconds."""
+        if not dur_str:
+            return None
+        parts = dur_str.split(":")
+        try:
+            if len(parts) == 3:
+                return int(parts[0]) * 3600 + int(parts[1]) * 60 + int(parts[2])
+            if len(parts) == 2:
+                return int(parts[0]) * 60 + int(parts[1])
+        except (ValueError, TypeError):
+            return None
+        return None
+
+    def _p80(values):
+        """Compute p80 from a list of numbers."""
+        if not values:
+            return None
+        s = sorted(values)
+        k = (len(s) - 1) * 0.8
+        f = int(k)
+        c = min(f + 1, len(s) - 1)
+        return round(s[f] + (k - f) * (s[c] - s[f]))
+
+    job_p80_models_success = {}
+    job_p80_duration_success = {}
     for jid, runs_list in successful_by_job.items():
         model_counts = []
-        for r in runs_list[:5]:
+        durations = []
+        for r in runs_list:
             details = success_run_details.get(r["id"])
             if details:
                 model_counts.append(details["total_model_count"])
+            dur = _parse_duration(r.get("run_duration"))
+            if dur is not None:
+                durations.append(dur)
         if model_counts:
-            job_avg_models_success[jid] = round(sum(model_counts) / len(model_counts))
+            job_p80_models_success[jid] = _p80(model_counts)
+        if durations:
+            job_p80_duration_success[jid] = _p80(durations)
 
     failed_by_job = defaultdict(list)
     for r in failed_runs:
         failed_by_job[r["job_definition_id"]].append(r)
 
-    job_avg_skipped_failed = {}
+    job_p80_skipped_failed = {}
     for jid, runs_list in failed_by_job.items():
         skipped_counts = []
         for r in runs_list:
@@ -803,7 +858,7 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
             if details:
                 skipped_counts.append(details["skipped_model_count"])
         if skipped_counts:
-            job_avg_skipped_failed[jid] = round(sum(skipped_counts) / len(skipped_counts))
+            job_p80_skipped_failed[jid] = _p80(skipped_counts)
 
     job_success_rates = []
     for jid, info in scheduled_jobs.items():
@@ -818,8 +873,9 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
             "failed_runs": counts["failed"],
             "cancelled_runs": counts["cancelled"],
             "success_pct": success_pct,
-            "avg_models_success": job_avg_models_success.get(jid),
-            "avg_skipped_failed": job_avg_skipped_failed.get(jid),
+            "p80_models_success": job_p80_models_success.get(jid),
+            "p80_duration_success": job_p80_duration_success.get(jid),
+            "p80_skipped_failed": job_p80_skipped_failed.get(jid),
         })
     job_success_rates.sort(key=lambda j: j["success_pct"])
 
