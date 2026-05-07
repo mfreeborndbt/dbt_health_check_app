@@ -39,6 +39,7 @@
     .badge-leaf { background:rgba(248,113,113,0.15);color:var(--red); }
     .badge-upstream { background:rgba(251,191,36,0.15);color:var(--orange); }
     .badge-na { background:rgba(139,143,163,0.08);color:var(--text-muted); }
+    .mat-table { color:var(--green); } .mat-view { color:var(--blue); } .mat-incremental { color:var(--orange); } .mat-ephemeral { color:var(--text-muted); }
     .muted-num { color:var(--text-muted); }
     .filter-bar { display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;align-items:center; }
     .filter-bar .flabel { font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted); }
@@ -127,10 +128,11 @@
           <th class="sortable" data-col="4" data-type="num" title="Warehouse queries in the past month">Queries</th>
           <th class="sortable" data-col="5" data-type="num" title="Successful runs in past 30 days">Runs</th>
           <th class="sortable" data-col="6" data-type="num" title="Median build time (30d)">Median Time</th>
-          <th class="sortable" data-col="7" data-type="num" title="Total transitive downstream models">Downstream</th>
-          <th class="sortable" data-col="8" data-type="text" title="Modeling rules pass/total">Modeling</th>
-          <th class="sortable" data-col="9" data-type="text" title="Testing rules">Testing</th>
-          <th class="sortable" data-col="10" data-type="text" title="Has description">Docs</th>
+          <th class="sortable" data-col="7" data-type="num" title="Row count ~30 days ago">Rows (30d ago)</th>
+          <th class="sortable" data-col="8" data-type="num" title="Current row count">Rows (now)</th>
+          <th class="sortable" data-col="9" data-type="num" title="Change in rows over 30 days">Delta</th>
+          <th class="sortable" data-col="10" data-type="num" title="Average new rows per run">Avg New/Run</th>
+          <th class="sortable" data-col="11" data-type="num" title="Total transitive downstream models">Downstream</th>
         </tr>
       </thead>
       <tbody>
@@ -142,33 +144,17 @@
           </td>
           <td style="font-size:0.72rem;">{{ m.layer }}</td>
           <td>
-            {% if m.is_leaf %}
-            <span class="badge badge-leaf">Leaf</span>
-            {% else %}
-            <span class="badge badge-upstream">Upstream</span>
-            <span style="font-size:0.62rem;color:var(--text-muted);"> ({{ m.dead_children_count }}/{{ m.direct_children_count }})</span>
-            {% endif %}
+            {% if m.is_leaf %}<span class="badge badge-leaf">Leaf</span>{% else %}<span class="badge badge-upstream">Upstream</span>{% endif %}
           </td>
-          <td style="font-size:0.72rem;">{{ m.materialization or '—' }}</td>
+          <td style="font-size:0.72rem;"><span class="mat-{{ m.materialization }}">{{ m.materialization or '—' }}</span></td>
           <td>{% if m.query_count > 0 %}<span style="color:var(--orange);">{{ m.query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
           <td>{{ m.run_count }}</td>
           <td>{% if m.performance %}{{ fmtTime(m.performance.median) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
+          <td>{% if m.earliest_rows is not none %}{{ "{:,}".format(m.earliest_rows) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
+          <td>{% if m.latest_rows is not none %}{{ "{:,}".format(m.latest_rows) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
+          <td>{% if m.row_delta is not none %}{% if m.row_delta > 0 %}<span style="color:var(--green);">+{{ "{:,}".format(m.row_delta) }}</span>{% elif m.row_delta < 0 %}<span style="color:var(--red);">{{ "{:,}".format(m.row_delta) }}</span>{% else %}<span class="muted-num">0</span>{% endif %}{% else %}<span class="muted-num">—</span>{% endif %}</td>
+          <td>{% if m.avg_new_rows is not none %}{{ "{:,.0f}".format(m.avg_new_rows) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
           <td>{{ m.downstream_count }}</td>
-          <td>
-            {% if m.modeling_total_count > 0 %}
-            <span class="badge {% if m.modeling_pass_count == m.modeling_total_count %}badge-pass{% elif m.modeling_pass_count == 0 %}badge-fail{% else %}badge-na{% endif %}">{{ m.modeling_pass_count }}/{{ m.modeling_total_count }}</span>
-            {% else %}<span class="muted-num">—</span>{% endif %}
-          </td>
-          <td>
-            {% if m.testing.has_test %}<span class="badge badge-pass">{{ m.testing.total_test_count }} tests</span>{% else %}<span class="badge badge-fail">None</span>{% endif %}
-            {% if m.testing.primary_key_test %}<span class="badge badge-pass" style="margin-left:0.15rem;">PK</span>{% endif %}
-          </td>
-          <td>
-            {% if m.documentation.has_description %}<span class="badge badge-pass">Yes</span>{% else %}<span class="badge badge-fail">No</span>{% endif %}
-            {% if m.documentation.columns_total > 0 %}
-            <span style="font-size:0.62rem;color:var(--text-muted);margin-left:0.15rem;">{{ m.documentation.columns_documented }}/{{ m.documentation.columns_total }} cols</span>
-            {% endif %}
-          </td>
         </tr>
         {% endfor %}
       </tbody>
