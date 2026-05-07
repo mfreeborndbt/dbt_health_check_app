@@ -58,6 +58,7 @@
     <a href="/best-practices" class="tab">Best Practice Checks</a>
     <a href="/dead-models" class="tab active">Dead Models</a>
     <a href="/incremental-candidates" class="tab">Incremental Candidates</a>
+    <a href="/macro-usage" class="tab">Macro Usage</a>
     <span class="tab-spacer"></span>
     <span class="tab-sep"></span>
     <a href="/config" class="tab-link">High Impact Config</a>
@@ -128,11 +129,8 @@
           <th class="sortable" data-col="4" data-type="num" title="Warehouse queries in the past month">Queries</th>
           <th class="sortable" data-col="5" data-type="num" title="Successful runs in past 30 days">Runs</th>
           <th class="sortable" data-col="6" data-type="num" title="Median build time (30d)">Median Time</th>
-          <th class="sortable" data-col="7" data-type="num" title="Row count ~30 days ago">Rows (30d ago)</th>
-          <th class="sortable" data-col="8" data-type="num" title="Current row count">Rows (now)</th>
-          <th class="sortable" data-col="9" data-type="num" title="Change in rows over 30 days">Delta</th>
-          <th class="sortable" data-col="10" data-type="num" title="Average new rows per run">Avg New/Run</th>
-          <th class="sortable" data-col="11" data-type="num" title="Total transitive downstream models">Downstream</th>
+          <th class="sortable" data-col="7" data-type="num" title="Latest known row count">Rows</th>
+          <th class="sortable" data-col="8" data-type="num" title="Total transitive downstream models">Downstream</th>
         </tr>
       </thead>
       <tbody>
@@ -150,10 +148,7 @@
           <td>{% if m.query_count > 0 %}<span style="color:var(--orange);">{{ m.query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
           <td>{{ m.run_count }}</td>
           <td>{% if m.performance %}{{ fmtTime(m.performance.median) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
-          <td>{% if m.earliest_rows is not none %}{{ "{:,}".format(m.earliest_rows) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
           <td>{% if m.latest_rows is not none %}{{ "{:,}".format(m.latest_rows) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
-          <td>{% if m.row_delta is not none %}{% if m.row_delta > 0 %}<span style="color:var(--green);">+{{ "{:,}".format(m.row_delta) }}</span>{% elif m.row_delta < 0 %}<span style="color:var(--red);">{{ "{:,}".format(m.row_delta) }}</span>{% else %}<span class="muted-num">0</span>{% endif %}{% else %}<span class="muted-num">—</span>{% endif %}</td>
-          <td>{% if m.avg_new_rows is not none %}{{ "{:,.0f}".format(m.avg_new_rows) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
           <td>{{ m.downstream_count }}</td>
         </tr>
         {% endfor %}
