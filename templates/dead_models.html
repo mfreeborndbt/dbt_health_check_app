@@ -1,0 +1,252 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Dead Models — dbt Health Check</title>
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2218%22 fill=%22%2334d399%22/><text y=%2272%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2258%22 font-family=%22system-ui%22 font-weight=%22700%22 fill=%22white%22>H</text></svg>">
+  <style>
+    :root { --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--text-muted:#8b8fa3;--accent:#34d399;--green:#34d399;--red:#f87171;--orange:#fbbf24;--blue:#60a5fa; }
+    * { margin:0;padding:0;box-sizing:border-box; }
+    body { font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,monospace;background:var(--bg);color:var(--text);padding:2rem; }
+    a { color:var(--accent);text-decoration:none; } a:hover { text-decoration:underline; }
+    .tab-nav { display:flex;align-items:center;border-bottom:1px solid var(--border);margin-bottom:1.5rem; }
+    .tab { padding:0.6rem 1.25rem;font-size:0.85rem;color:var(--text-muted);text-decoration:none;border-bottom:2px solid transparent;margin-bottom:-1px; }
+    .tab:hover { color:var(--text);text-decoration:none; } .tab.active { color:var(--accent);border-bottom-color:var(--accent);font-weight:600; }
+    .tab-spacer { flex:1; } .tab-sep { width:1px;height:1.1rem;background:var(--border);margin:0 0.25rem;align-self:center; }
+    .tab-link { padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-muted);text-decoration:none; } .tab-link:hover { color:var(--accent);text-decoration:none; }
+    header h1 { font-size:1.5rem;font-weight:600; } header h1 span { color:var(--accent); }
+    .subtitle { color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem; }
+    .summary-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1.5rem 0; }
+    .summary-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.25rem; }
+    .summary-card .label { font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.5rem; }
+    .summary-card .value { font-size:1.8rem;font-weight:700; } .summary-card .detail { font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem; }
+    .value-green { color:var(--green); } .value-red { color:var(--red); } .value-orange { color:var(--orange); }
+    .table-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem; }
+    .table-card h2 { font-size:0.95rem;font-weight:600;margin-bottom:0.5rem; }
+    .table-desc { font-size:0.78rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.5; }
+    table { width:100%;border-collapse:collapse; }
+    th { text-align:left;font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);padding:0.5rem 0.4rem;border-bottom:1px solid var(--border);white-space:nowrap; }
+    th.sortable { cursor:pointer;user-select:none; } th.sortable:hover { color:var(--text); }
+    th.sortable::after { content:' \21C5';display:inline-block;margin-left:0.15rem;opacity:0.3;font-size:0.6rem; }
+    th.sort-asc::after { content:' \25B2';opacity:1; } th.sort-desc::after { content:' \25BC';opacity:1; }
+    td { padding:0.4rem 0.4rem;font-size:0.78rem;border-bottom:1px solid var(--border);vertical-align:top; }
+    tr:last-child td { border-bottom:none; } tr:hover td { background:rgba(255,255,255,0.02); }
+    .model-name { font-weight:600;font-size:0.8rem; }
+    .badge { display:inline-block;padding:0.1rem 0.35rem;border-radius:3px;font-size:0.65rem;font-weight:600; }
+    .badge-pass { background:rgba(52,211,153,0.15);color:var(--green); }
+    .badge-fail { background:rgba(248,113,113,0.15);color:var(--red); }
+    .badge-leaf { background:rgba(248,113,113,0.15);color:var(--red); }
+    .badge-upstream { background:rgba(251,191,36,0.15);color:var(--orange); }
+    .badge-na { background:rgba(139,143,163,0.08);color:var(--text-muted); }
+    .muted-num { color:var(--text-muted); }
+    .filter-bar { display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;align-items:center; }
+    .filter-bar .flabel { font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted); }
+    .fbtn { background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:0.72rem;padding:0.25rem 0.6rem;cursor:pointer;font-family:inherit;transition:background 0.12s,color 0.12s,border-color 0.12s; }
+    .fbtn:hover { color:var(--text);border-color:var(--text-muted); }
+    .fbtn.active { background:rgba(96,165,250,0.15);border-color:var(--blue);color:var(--blue); }
+    .search-box { background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.75rem;color:var(--text);font-size:0.8rem;font-family:inherit;width:220px; }
+    .search-box:focus { border-color:var(--accent);outline:none; }
+    .empty-state { text-align:center;padding:3rem 2rem;color:var(--text-muted); }
+    .empty-state h3 { font-size:1.1rem;margin-bottom:0.5rem;color:var(--text); }
+  </style>
+</head>
+<body>
+  <nav class="tab-nav">
+    <a href="/data-quality" class="tab">Data Quality</a>
+    <a href="/project-health" class="tab">Project Health</a>
+    <a href="/dead-models" class="tab active">Dead Models</a>
+    <span class="tab-spacer"></span>
+    <span class="tab-sep"></span>
+    <a href="/config" class="tab-link">High Impact Config</a>
+    <span class="tab-sep"></span>
+    <a href="/setup" class="tab-link">&#9881; Settings</a>
+  </nav>
+  <header>
+    <h1><span>&#9642;</span> Dead Models</h1>
+    <div class="subtitle">Potentially unused models — no downstream deps, low query volume, no exposures or semantic models &mdash; {{ creds.name or creds.account_prefix }}</div>
+  </header>
+
+  <div class="summary-grid">
+    <div class="summary-card">
+      <div class="label">Total Models</div>
+      <div class="value">{{ summary.total_models }}</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Dead Candidates</div>
+      <div class="value value-red">{{ summary.candidate_count }}</div>
+      <div class="detail">{{ '%0.0f' | format(summary.candidate_count / summary.total_models * 100) if summary.total_models else 0 }}% of project</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Leaf (no children)</div>
+      <div class="value value-red">{{ summary.leaf_count }}</div>
+      <div class="detail">terminal dead-end models</div>
+    </div>
+    <div class="summary-card">
+      <div class="label">Upstream Dead</div>
+      <div class="value value-orange">{{ summary.upstream_count }}</div>
+      <div class="detail">feed only dead models</div>
+    </div>
+  </div>
+
+  <div class="table-card">
+    <h2>Dead Model Candidates</h2>
+    <div class="table-desc">
+      A model is flagged when it has <strong>no downstream model dependents</strong> (or all its dependents are also dead),
+      <strong>&le; {{ summary.query_threshold }} warehouse queries</strong> in the past month, and
+      <strong>no exposures or semantic models</strong> reference it.
+      Starting from leaf nodes, the analysis walks upstream to find chains of dead models.
+    </div>
+
+    {% if summary.candidates %}
+    <div class="filter-bar">
+      <span class="flabel">Type:</span>
+      <button class="fbtn active" onclick="filterType('all',this)">All ({{ summary.candidate_count }})</button>
+      <button class="fbtn" onclick="filterType('leaf',this)">Leaf ({{ summary.leaf_count }})</button>
+      <button class="fbtn" onclick="filterType('upstream',this)">Upstream ({{ summary.upstream_count }})</button>
+      <span style="width:1px;height:1rem;background:var(--border);margin:0 0.3rem;"></span>
+      <span class="flabel">Layer:</span>
+      <button class="fbtn" onclick="filterLayer('staging',this)">Staging</button>
+      <button class="fbtn" onclick="filterLayer('intermediate',this)">Intermediate</button>
+      <button class="fbtn" onclick="filterLayer('marts',this)">Marts</button>
+      <button class="fbtn" onclick="filterLayer('other',this)">Other</button>
+      <span style="flex:1;"></span>
+      <input type="text" class="search-box" id="searchBox" placeholder="Search models..." oninput="applyFilters()">
+      <span class="muted-num" style="font-size:0.72rem;" id="rowCount">{{ summary.candidate_count }} models</span>
+    </div>
+
+    <div style="overflow-x:auto;">
+    <table id="deadTable">
+      <thead>
+        <tr>
+          <th class="sortable" data-col="0" data-type="text">Model</th>
+          <th class="sortable" data-col="1" data-type="text">Layer</th>
+          <th class="sortable" data-col="2" data-type="text">Type</th>
+          <th class="sortable" data-col="3" data-type="text">Materialization</th>
+          <th class="sortable" data-col="4" data-type="num" title="Warehouse queries in the past month">Queries</th>
+          <th class="sortable" data-col="5" data-type="num" title="Successful runs in past 30 days">Runs</th>
+          <th class="sortable" data-col="6" data-type="num" title="Median build time (30d)">Median Time</th>
+          <th class="sortable" data-col="7" data-type="num" title="Total transitive downstream models">Downstream</th>
+          <th class="sortable" data-col="8" data-type="text" title="Modeling rules pass/total">Modeling</th>
+          <th class="sortable" data-col="9" data-type="text" title="Testing rules">Testing</th>
+          <th class="sortable" data-col="10" data-type="text" title="Has description">Docs</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for m in summary.candidates %}
+        <tr data-type="{{ 'leaf' if m.is_leaf else 'upstream' }}" data-layer="{{ m.layer }}" data-name="{{ m.name|lower }}">
+          <td>
+            <div class="model-name">{{ m.name }}</div>
+            <div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.1rem;">{{ m.folder }}{% if m.subfolder %}/{{ m.subfolder }}{% endif %}</div>
+          </td>
+          <td style="font-size:0.72rem;">{{ m.layer }}</td>
+          <td>
+            {% if m.is_leaf %}
+            <span class="badge badge-leaf">Leaf</span>
+            {% else %}
+            <span class="badge badge-upstream">Upstream</span>
+            <span style="font-size:0.62rem;color:var(--text-muted);"> ({{ m.dead_children_count }}/{{ m.direct_children_count }})</span>
+            {% endif %}
+          </td>
+          <td style="font-size:0.72rem;">{{ m.materialization or '—' }}</td>
+          <td>{% if m.query_count > 0 %}<span style="color:var(--orange);">{{ m.query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+          <td>{{ m.run_count }}</td>
+          <td>{% if m.performance %}{{ fmtTime(m.performance.median) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
+          <td>{{ m.downstream_count }}</td>
+          <td>
+            {% if m.modeling_total_count > 0 %}
+            <span class="badge {% if m.modeling_pass_count == m.modeling_total_count %}badge-pass{% elif m.modeling_pass_count == 0 %}badge-fail{% else %}badge-na{% endif %}">{{ m.modeling_pass_count }}/{{ m.modeling_total_count }}</span>
+            {% else %}<span class="muted-num">—</span>{% endif %}
+          </td>
+          <td>
+            {% if m.testing.has_test %}<span class="badge badge-pass">{{ m.testing.total_test_count }} tests</span>{% else %}<span class="badge badge-fail">None</span>{% endif %}
+            {% if m.testing.primary_key_test %}<span class="badge badge-pass" style="margin-left:0.15rem;">PK</span>{% endif %}
+          </td>
+          <td>
+            {% if m.documentation.has_description %}<span class="badge badge-pass">Yes</span>{% else %}<span class="badge badge-fail">No</span>{% endif %}
+            {% if m.documentation.columns_total > 0 %}
+            <span style="font-size:0.62rem;color:var(--text-muted);margin-left:0.15rem;">{{ m.documentation.columns_documented }}/{{ m.documentation.columns_total }} cols</span>
+            {% endif %}
+          </td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+    </div>
+    {% else %}
+    <div class="empty-state">
+      <h3>No dead models found</h3>
+      <p>All models have downstream dependencies, significant query volume, or exposure/semantic model references.</p>
+    </div>
+    {% endif %}
+  </div>
+
+<script>
+var activeType = 'all';
+var activeLayer = null;
+
+function filterType(type, btn) {
+  activeType = type;
+  document.querySelectorAll('.filter-bar .fbtn').forEach(function(b) {
+    if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf('filterType') === 0) b.classList.remove('active');
+  });
+  btn.classList.add('active');
+  applyFilters();
+}
+
+function filterLayer(layer, btn) {
+  if (activeLayer === layer) {
+    activeLayer = null;
+    btn.classList.remove('active');
+  } else {
+    activeLayer = layer;
+    document.querySelectorAll('.filter-bar .fbtn').forEach(function(b) {
+      if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf('filterLayer') === 0) b.classList.remove('active');
+    });
+    btn.classList.add('active');
+  }
+  applyFilters();
+}
+
+function applyFilters() {
+  var search = (document.getElementById('searchBox').value || '').toLowerCase();
+  var visible = 0;
+  document.querySelectorAll('#deadTable tbody tr').forEach(function(row) {
+    var matchType = activeType === 'all' || row.dataset.type === activeType;
+    var matchLayer = !activeLayer || row.dataset.layer === activeLayer;
+    var matchSearch = !search || row.dataset.name.indexOf(search) !== -1;
+    var show = matchType && matchLayer && matchSearch;
+    row.style.display = show ? '' : 'none';
+    if (show) visible++;
+  });
+  document.getElementById('rowCount').textContent = visible + ' models';
+}
+
+document.querySelectorAll('th.sortable').forEach(function(th) {
+  th.addEventListener('click', function() {
+    var table = document.getElementById('deadTable');
+    if (!table) return;
+    var tbody = table.querySelector('tbody');
+    var rows = Array.from(tbody.querySelectorAll('tr'));
+    var col = parseInt(th.dataset.col);
+    var type = th.dataset.type;
+    var asc = !th.classList.contains('sort-asc');
+    table.querySelectorAll('th.sortable').forEach(function(h) { h.classList.remove('sort-asc','sort-desc'); });
+    th.classList.add(asc ? 'sort-asc' : 'sort-desc');
+    rows.sort(function(a, b) {
+      var av = a.children[col].textContent.trim();
+      var bv = b.children[col].textContent.trim();
+      if (type === 'num') {
+        av = parseFloat(av.replace(/[^0-9.\-]/g, '')) || 0;
+        bv = parseFloat(bv.replace(/[^0-9.\-]/g, '')) || 0;
+      } else { av = av.toLowerCase(); bv = bv.toLowerCase(); }
+      if (av < bv) return asc ? -1 : 1;
+      if (av > bv) return asc ? 1 : -1;
+      return 0;
+    });
+    rows.forEach(function(r) { tbody.appendChild(r); });
+  });
+});
+</script>
+</body>
+</html>
