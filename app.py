@@ -88,6 +88,15 @@ def _preload_incremental_candidates():
     fetch_incremental_candidates(client)
 
 
+def _preload_macro_usage():
+    creds = load_credentials()
+    if creds is None:
+        raise Exception("Not configured")
+    client = get_client_from_config()
+    from macro_usage import fetch_macro_usage
+    fetch_macro_usage(client)
+
+
 def _invalidate_summary():
     """Clear the summary cache so config changes take effect."""
     from data_quality import _summary_db_key, _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
@@ -266,6 +275,9 @@ def _needs_loading(page="/observability"):
     if page == "/incremental-candidates":
         from incremental_candidates import is_incremental_candidates_cached
         return not is_incremental_candidates_cached(client)
+    if page == "/macro-usage":
+        from macro_usage import is_macro_usage_cached
+        return not is_macro_usage_cached(client)
     return not is_summary_cached(client)
 
 
@@ -279,6 +291,7 @@ def loading():
         "/best-practices": "Best Practice Checks",
         "/dead-models": "Dead Models",
         "/incremental-candidates": "Incremental Candidates",
+        "/macro-usage": "Macro Usage",
     }
     page_name = page_names.get(next_page, next_page)
     return render_template("loading.html", next_page=next_page, page_name=page_name, project_name=project_name)
@@ -302,6 +315,8 @@ def api_load():
                     _preload_dead_models()
                 elif page == "/incremental-candidates":
                     _preload_incremental_candidates()
+                elif page == "/macro-usage":
+                    _preload_macro_usage()
                 else:
                     _preload_observability()
             except Exception as e:
@@ -435,6 +450,29 @@ def incremental_candidates():
         flash(f"Error fetching incremental candidates: {e}", "error")
         return redirect(url_for("observability"))
     return render_template("incremental_candidates.html", creds=creds, summary=summary)
+
+
+@app.route("/macro-usage")
+def macro_usage():
+    creds = load_credentials()
+    if creds is None:
+        return redirect(url_for("setup"))
+
+    if _needs_loading("/macro-usage"):
+        return redirect(url_for("loading", next="/macro-usage"))
+
+    client = get_client_from_config()
+    try:
+        from macro_usage import fetch_macro_usage
+        summary = fetch_macro_usage(client)
+    except Exception as e:
+        err = str(e)
+        if any(s in err for s in ("401", "403", "Unauthorized", "Forbidden")):
+            flash("API authentication failed.", "error")
+            return redirect(url_for("setup"))
+        flash(f"Error fetching macro usage: {e}", "error")
+        return redirect(url_for("observability"))
+    return render_template("macro_usage.html", creds=creds, summary=summary)
 
 
 if __name__ == "__main__":

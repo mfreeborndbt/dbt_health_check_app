@@ -80,6 +80,7 @@
     <a href="/best-practices" class="tab">Best Practice Checks</a>
     <a href="/dead-models" class="tab">Dead Models</a>
     <a href="/incremental-candidates" class="tab">Incremental Candidates</a>
+    <a href="/macro-usage" class="tab">Macro Usage</a>
     <span class="tab-spacer"></span>
     <span class="tab-sep"></span>
     <a href="/config" class="tab-link">High Impact Config</a>
@@ -447,9 +448,15 @@ function filterModelTable() {
 
   document.querySelectorAll('#tab-models .model-row').forEach(function(row) {
     var detailRow = detailMap.get(row);
+    var cells = row.querySelectorAll('td');
     if (!filterDates) {
       row.style.display = '';
       if (detailRow) { detailRow.style.display = 'none'; detailRow.querySelectorAll('.err-row').forEach(function(r) { r.style.display = ''; }); }
+      // Restore original counts
+      if (cells[1]) { var v = parseInt(row.dataset.exec || 0) + parseInt(row.dataset.test || 0) + parseInt(row.dataset.warn || 0); cells[1].innerHTML = '<span style="font-weight:600;">' + v + '</span>'; cells[1].dataset.val = v; }
+      if (cells[2]) { var v = parseInt(row.dataset.exec || 0); cells[2].innerHTML = v > 0 ? '<span style="color:var(--red);font-weight:600;">' + v + '</span>' : '<span class="muted-num">0</span>'; cells[2].dataset.val = v; }
+      if (cells[3]) { var v = parseInt(row.dataset.test || 0); cells[3].innerHTML = v > 0 ? '<span style="color:var(--red);font-weight:600;">' + v + '</span>' : '<span class="muted-num">0</span>'; cells[3].dataset.val = v; }
+      if (cells[5]) { var v = parseInt(row.dataset.warn || 0); cells[5].innerHTML = v > 0 ? '<span style="color:var(--orange);">' + v + '</span>' : '<span class="muted-num">0</span>'; cells[5].dataset.val = v; }
     } else {
       var rowDates = (row.getAttribute('data-dates') || '').split(',');
       var match = rowDates.some(function(d) { return filterDates.has(d); });
@@ -459,6 +466,26 @@ function filterModelTable() {
         detailRow.querySelectorAll('.err-row').forEach(function(r) {
           r.style.display = filterDates.has(r.getAttribute('data-date')) ? '' : 'none';
         });
+        // Recount visible errors/warnings for this date selection
+        var execCount = 0, testCount = 0, warnCount = 0;
+        detailRow.querySelectorAll('.err-row').forEach(function(r) {
+          if (r.style.display === 'none') return;
+          var section = r.closest('.detail-section');
+          if (!section) return;
+          var heading = section.querySelector('div');
+          if (heading && heading.textContent.indexOf('Warning') >= 0) warnCount++;
+          else {
+            var src = r.querySelector('.badge-error');
+            var tst = r.querySelector('.badge-test');
+            if (src) execCount++;
+            else if (tst) testCount++;
+          }
+        });
+        var total = execCount + testCount + warnCount;
+        if (cells[1]) { cells[1].innerHTML = '<span style="font-weight:600;">' + total + '</span>'; cells[1].dataset.val = total; }
+        if (cells[2]) { cells[2].innerHTML = execCount > 0 ? '<span style="color:var(--red);font-weight:600;">' + execCount + '</span>' : '<span class="muted-num">0</span>'; cells[2].dataset.val = execCount; }
+        if (cells[3]) { cells[3].innerHTML = testCount > 0 ? '<span style="color:var(--red);font-weight:600;">' + testCount + '</span>' : '<span class="muted-num">0</span>'; cells[3].dataset.val = testCount; }
+        if (cells[5]) { cells[5].innerHTML = warnCount > 0 ? '<span style="color:var(--orange);">' + warnCount + '</span>' : '<span class="muted-num">0</span>'; cells[5].dataset.val = warnCount; }
       }
     }
     var btn = row.querySelector('.toggle-btn');

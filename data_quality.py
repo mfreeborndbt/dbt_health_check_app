@@ -103,17 +103,59 @@ def _get_scheduled_jobs(client: DbtClient):
 
 
 def _fetch_runs(client: DbtClient, days=30):
-    key = _cache_key("runs_v3", client.account_id, client.project_id, client.environment_id, days)
-    cached = _cache_get(key)
-    if cached is not None:
-        print(f"[{client.name}] Serving {len(cached)} runs from cache")
-        return cached
-
+    key = _cache_key("runs_v4", client.account_id, client.project_id, client.environment_id, days)
     now = datetime.now(timezone.utc)
     cutoff = (now - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Try incremental: load cached runs, prune old, fetch only new
+    cached = _cache_get(key)
+    if cached is not None and isinstance(cached, list) and len(cached) > 0:
+        # Prune anything older than the rolling 30-day window
+        pruned = [r for r in cached if r["created_at"][:19] >= cutoff]
+        newest = max(r["created_at"][:19] for r in pruned) if pruned else cutoff
+
+        # Fetch only runs newer than what we have
+        new_runs = []
+        offset = 0
+        while True:
+            params = {
+                "project_id": client.project_id,
+                "order_by": "-created_at",
+                "limit": 100,
+                "offset": offset,
+            }
+            data = client.admin_get("runs/", params=params)
+            batch = data["data"]
+            if not batch:
+                break
+            done = False
+            for r in batch:
+                if r["created_at"][:19] <= newest:
+                    done = True
+                    break
+                new_runs.append(r)
+            if done:
+                break
+            offset += 100
+
+        if new_runs:
+            # Deduplicate by run id
+            existing_ids = {r["id"] for r in pruned}
+            for r in new_runs:
+                if r["id"] not in existing_ids:
+                    pruned.append(r)
+            pruned.sort(key=lambda r: r["created_at"], reverse=True)
+            print(f"[{client.name}] Incremental: {len(new_runs)} new runs, {len(pruned)} total after prune")
+            _cache_set(key, pruned)
+        else:
+            print(f"[{client.name}] Serving {len(pruned)} runs from cache (no new runs)")
+            if len(pruned) != len(cached):
+                _cache_set(key, pruned)  # Save pruned version
+        return pruned
+
+    # Cold start: fetch everything
     runs = []
     offset = 0
-
     while True:
         params = {
             "project_id": client.project_id,
