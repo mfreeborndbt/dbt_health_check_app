@@ -248,6 +248,106 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
     return run_times
 
 
+def _fetch_model_run_stats(client: DbtClient, model_uids):
+    """Fetch execution times AND row counts from modelHistoricalRuns with stats.
+
+    Returns dict: uid -> {
+        "times": [float], "row_counts": [(date_str, int)],
+        "earliest_rows": int|None, "latest_rows": int|None,
+        "row_delta": int|None, "avg_new_rows": float|None,
+    }
+    """
+    key = _cache_key("ph_runstats_v1", client.account_id, client.environment_id)
+    cached = db_get(f"api:{key}", ttl=_API_TTL)
+    if cached is not None:
+        return cached
+
+    from datetime import datetime, timedelta, timezone
+    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+
+    print(f"[{client.name}] Fetching model run stats (times + rows) for {len(model_uids)} models...")
+    results = {}
+    batch_size = 25
+    uids = list(model_uids)
+
+    for i in range(0, len(uids), batch_size):
+        batch = uids[i:i + batch_size]
+        aliases = []
+        for j, uid in enumerate(batch):
+            safe_uid = uid.replace('"', '\\"')
+            aliases.append(
+                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 200) '
+                f'{{ uniqueId executionTime status executeCompletedAt stats {{ id value }} }}'
+            )
+        gql = (
+            "query ($environmentId: BigInt!) {\n"
+            "  environment(id: $environmentId) {\n"
+            "    applied {\n"
+            "      " + "\n      ".join(aliases) + "\n"
+            "    }\n"
+            "  }\n"
+            "}"
+        )
+        try:
+            data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
+            applied = data["environment"]["applied"]
+            for j, uid in enumerate(batch):
+                runs = applied.get(f"m{j}") or []
+                times = []
+                row_counts = []
+                for r in runs:
+                    if r.get("status") != "success":
+                        continue
+                    completed = r.get("executeCompletedAt") or ""
+                    in_window = True
+                    if completed:
+                        try:
+                            dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                            if dt < cutoff:
+                                in_window = False
+                        except (ValueError, TypeError):
+                            pass
+
+                    if in_window and r.get("executionTime") and r["executionTime"] > 0:
+                        times.append(r["executionTime"])
+
+                    # Row counts from stats
+                    if in_window:
+                        stats = {s["id"]: s["value"] for s in (r.get("stats") or [])}
+                        rc = stats.get("row_count") or stats.get("rows_affected") or stats.get("num_rows")
+                        if rc is not None:
+                            try:
+                                row_counts.append((completed, int(float(rc))))
+                            except (ValueError, TypeError):
+                                pass
+
+                row_counts.sort(key=lambda x: x[0])
+                earliest = row_counts[0][1] if row_counts else None
+                latest = row_counts[-1][1] if row_counts else None
+                delta = (latest - earliest) if (latest is not None and earliest is not None) else None
+                total_runs = len(times)
+                avg_new = (delta / total_runs) if (delta is not None and total_runs > 0) else None
+
+                results[uid] = {
+                    "times": times,
+                    "row_counts": row_counts,
+                    "earliest_rows": earliest,
+                    "latest_rows": latest,
+                    "row_delta": delta,
+                    "avg_new_rows": round(avg_new, 1) if avg_new is not None else None,
+                }
+        except Exception as e:
+            print(f"  Batch {i // batch_size} error: {e}")
+
+        done = min(i + batch_size, len(uids))
+        if done < len(uids):
+            print(f"  Fetched run stats {done}/{len(uids)} models...")
+
+    db_set(f"api:{key}", results)
+    print(f"[{client.name}] Fetched run stats for {len(results)} models")
+    return results
+
+
 # ---------------------------------------------------------------------------
 # Path helpers
 # ---------------------------------------------------------------------------

@@ -226,7 +226,7 @@ def fetch_incremental_candidates(client: DbtClient):
     t0 = time.time()
 
     from project_health import (
-        _fetch_all_models, _fetch_model_run_times,
+        _fetch_all_models, _fetch_model_run_stats,
         _infer_layer, _parse_path, _percentile,
     )
     from data_quality import (
@@ -239,7 +239,7 @@ def fetch_incremental_candidates(client: DbtClient):
 
     details = _fetch_model_details(client)
     table_uids = list(details.keys())
-    run_times = _fetch_model_run_times(client, table_uids)
+    run_stats = _fetch_model_run_stats(client, table_uids)
     downstream_counts, upstream_counts, children_of = _fetch_dependency_counts(client)
     query_counts = _fetch_model_usage_query_counts(client)
 
@@ -281,7 +281,8 @@ def fetch_incremental_candidates(client: DbtClient):
     print(f"[{client.name}] Building incremental candidates...")
     medians = {}
     for uid in table_uids:
-        times = sorted(run_times.get(uid, []))
+        stats = run_stats.get(uid, {})
+        times = sorted(stats.get("times", []))
         if times:
             medians[uid] = _percentile(times, 50)
 
@@ -301,7 +302,8 @@ def fetch_incremental_candidates(client: DbtClient):
         folder, subfolder, subsubfolder = _parse_path(m.get("filePath"))
         layer = _infer_layer(m)
 
-        times = sorted(run_times.get(uid, []))
+        stats = run_stats.get(uid, {})
+        times = sorted(stats.get("times", []))
         perf = {}
         if times:
             perf = {
@@ -366,6 +368,10 @@ def fetch_incremental_candidates(client: DbtClient):
             "custom_macros": detail.get("custom_macros", []),
             "lines": detail.get("lines", 0),
             "column_count": detail.get("column_count", 0),
+            "earliest_rows": stats.get("earliest_rows"),
+            "latest_rows": stats.get("latest_rows"),
+            "row_delta": stats.get("row_delta"),
+            "avg_new_rows": stats.get("avg_new_rows"),
             "readiness": readiness,
             "readiness_details": readiness_details,
             "is_high_impact": is_high_impact,

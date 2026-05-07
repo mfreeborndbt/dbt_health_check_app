@@ -52,13 +52,10 @@ def fetch_dead_models(client: DbtClient):
         _fetch_all_models,
         _fetch_all_sources,
         _fetch_all_exposures,
-        _fetch_model_run_times,
+        _fetch_model_run_stats,
         _infer_layer,
         _parse_path,
         _percentile,
-        _evaluate_modeling_rules,
-        _evaluate_testing_rules,
-        _evaluate_documentation_rules,
     )
     from data_quality import (
         _fetch_high_impact_signals,
@@ -108,8 +105,8 @@ def fetch_dead_models(client: DbtClient):
     # --- Query counts ---
     query_counts = _fetch_model_usage_query_counts(client)
 
-    # --- Run times ---
-    run_times = _fetch_model_run_times(client, [m["uniqueId"] for m in models])
+    # --- Run stats (times + row counts) ---
+    run_stats = _fetch_model_run_stats(client, [m["uniqueId"] for m in models])
 
     # --- BFS pruning from leaves upward ---
     print(f"[{client.name}] Identifying dead model candidates...")
@@ -158,23 +155,14 @@ def fetch_dead_models(client: DbtClient):
         folder, subfolder, subsubfolder = _parse_path(m.get("filePath"))
         layer = _infer_layer(m)
 
-        times = sorted(run_times.get(uid, []))
+        stats = run_stats.get(uid, {})
+        times = sorted(stats.get("times", []))
         perf = {}
         if times:
             perf = {
-                "min": round(min(times), 1),
-                "p20": round(_percentile(times, 20), 1),
                 "median": round(_percentile(times, 50), 1),
-                "p80": round(_percentile(times, 80), 1),
-                "max": round(max(times), 1),
             }
 
-        modeling = _evaluate_modeling_rules(m, model_map, source_map, source_children)
-        testing = _evaluate_testing_rules(m)
-        documentation = _evaluate_documentation_rules(m)
-
-        # Count how many of this model's children are also dead candidates
-        dead_children = children_of.get(uid, set()) & candidates
         total_children = len(children_of.get(uid, set()))
 
         results.append({
@@ -189,18 +177,11 @@ def fetch_dead_models(client: DbtClient):
             "performance": perf,
             "downstream_count": downstream_counts.get(uid, 0),
             "upstream_count": upstream_counts.get(uid, 0),
-            "direct_children_count": total_children,
-            "dead_children_count": len(dead_children),
             "is_leaf": total_children == 0,
-            "modeling": modeling,
-            "testing": testing,
-            "documentation": documentation,
-            "modeling_pass_count": sum(1 for v in modeling.values() if v is True),
-            "modeling_total_count": sum(1 for v in modeling.values() if isinstance(v, bool)),
-            "testing_pass_count": sum(1 for k, v in testing.items() if v is True),
-            "testing_total_count": sum(1 for k, v in testing.items() if isinstance(v, bool)),
-            "documentation_pass_count": sum(1 for v in documentation.values() if v is True),
-            "documentation_total_count": sum(1 for v in documentation.values() if isinstance(v, bool)),
+            "earliest_rows": stats.get("earliest_rows"),
+            "latest_rows": stats.get("latest_rows"),
+            "row_delta": stats.get("row_delta"),
+            "avg_new_rows": stats.get("avg_new_rows"),
         })
 
     results.sort(key=lambda r: (0 if r["is_leaf"] else 1, r["query_count"], r["name"]))

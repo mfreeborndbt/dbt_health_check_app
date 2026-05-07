@@ -134,19 +134,23 @@
         <th data-col="3" onclick="sortTable(3,'str')">Subfolder</th>
         <th data-col="4" onclick="sortTable(4,'num')">Readiness</th>
         <th data-col="5" onclick="sortTable(5,'str')">High Impact</th>
-        <th data-col="6" onclick="sortTable(6,'num')">Runs</th>
-        <th data-col="7" onclick="sortTable(7,'num')">Median</th>
-        <th data-col="8" onclick="sortTable(8,'num')">p10</th>
-        <th data-col="9" onclick="sortTable(9,'num')">p90</th>
-        <th data-col="10" onclick="sortTable(10,'num')">Variation</th>
-        <th data-col="11" onclick="sortTable(11,'str')">Primary Key Test</th>
-        <th data-col="12" onclick="sortTable(12,'str')">Potential PK</th>
-        <th data-col="13" onclick="sortTable(13,'str')">Date / Timeseries</th>
-        <th data-col="14" onclick="sortTable(14,'num')">Window Fns</th>
-        <th data-col="15" onclick="sortTable(15,'num')">GROUP BY</th>
-        <th data-col="16" onclick="sortTable(16,'num')">UNIONs</th>
-        <th data-col="17" onclick="sortTable(17,'str')">Macros</th>
-        <th data-col="18" onclick="sortTable(18,'num')">Downstream</th>
+        <th data-col="6" onclick="sortTable(6,'num')">Rows (30d ago)</th>
+        <th data-col="7" onclick="sortTable(7,'num')">Rows (now)</th>
+        <th data-col="8" onclick="sortTable(8,'num')">Delta</th>
+        <th data-col="9" onclick="sortTable(9,'num')">Avg New/Run</th>
+        <th data-col="10" onclick="sortTable(10,'num')">Runs</th>
+        <th data-col="11" onclick="sortTable(11,'num')">Median</th>
+        <th data-col="12" onclick="sortTable(12,'num')">p10</th>
+        <th data-col="13" onclick="sortTable(13,'num')">p90</th>
+        <th data-col="14" onclick="sortTable(14,'num')">Variation</th>
+        <th data-col="15" onclick="sortTable(15,'str')">Primary Key Test</th>
+        <th data-col="16" onclick="sortTable(16,'str')">Potential PK</th>
+        <th data-col="17" onclick="sortTable(17,'str')">Date / Timeseries</th>
+        <th data-col="18" onclick="sortTable(18,'num')">Window Fns</th>
+        <th data-col="19" onclick="sortTable(19,'num')">GROUP BY</th>
+        <th data-col="20" onclick="sortTable(20,'num')">UNIONs</th>
+        <th data-col="21" onclick="sortTable(21,'str')">Macros</th>
+        <th data-col="22" onclick="sortTable(22,'num')">Downstream</th>
       </tr>
     </thead>
     <tbody>
@@ -178,6 +182,10 @@
         <td>
           {% if m.is_high_impact %}{% for r in m.hi_reasons %}<span class="hi-tag">{{ r }}</span>{% endfor %}{% else %}<span class="no-muted">--</span>{% endif %}
         </td>
+        <td class="num" data-val="{{ m.earliest_rows or 0 }}">{% if m.earliest_rows is not none %}{{ "{:,}".format(m.earliest_rows) }}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.latest_rows or 0 }}">{% if m.latest_rows is not none %}{{ "{:,}".format(m.latest_rows) }}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.row_delta or 0 }}">{% if m.row_delta is not none %}{% if m.row_delta > 0 %}<span style="color:var(--green);">+{{ "{:,}".format(m.row_delta) }}</span>{% elif m.row_delta < 0 %}<span style="color:var(--red);">{{ "{:,}".format(m.row_delta) }}</span>{% else %}<span class="muted">0</span>{% endif %}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.avg_new_rows or 0 }}">{% if m.avg_new_rows is not none %}{{ "{:,.0f}".format(m.avg_new_rows) }}{% else %}<span class="muted">--</span>{% endif %}</td>
         <td class="num" data-val="{{ m.run_count }}">{{ m.run_count }}</td>
         <td class="num" data-val="{{ m.performance.median or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.median) }}{% else %}<span class="muted">--</span>{% endif %}</td>
         <td class="num" data-val="{{ m.performance.p10 or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.p10) }}{% else %}<span class="muted">--</span>{% endif %}</td>
