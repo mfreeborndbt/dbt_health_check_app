@@ -2,6 +2,10 @@
 config/
 .env
 
+# Launcher state
+.pid
+.deps_hash
+
 # Python
 __pycache__/
 *.pyc

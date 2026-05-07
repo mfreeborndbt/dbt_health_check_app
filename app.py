@@ -72,6 +72,16 @@ def _preload_project_health():
     fetch_project_health(client)
 
 
+def _preload_dead_models():
+    """Run dead models loading, warming caches."""
+    creds = load_credentials()
+    if creds is None:
+        raise Exception("Not configured")
+    client = get_client_from_config()
+    from dead_models import fetch_dead_models
+    fetch_dead_models(client)
+
+
 def _invalidate_summary():
     """Clear the summary cache so config changes take effect."""
     from data_quality import _summary_db_key, _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
@@ -246,6 +256,9 @@ def _needs_loading(page="/data-quality"):
     if page == "/project-health":
         from project_health import is_project_health_cached
         return not is_project_health_cached(client)
+    if page == "/dead-models":
+        from dead_models import is_dead_models_cached
+        return not is_dead_models_cached(client)
     return not is_summary_cached(client)
 
 
@@ -257,6 +270,7 @@ def loading():
     page_names = {
         "/data-quality": "Data Quality",
         "/project-health": "Project Health",
+        "/dead-models": "Dead Models",
     }
     page_name = page_names.get(next_page, next_page)
     return render_template("loading.html", next_page=next_page, page_name=page_name, project_name=project_name)
@@ -276,6 +290,8 @@ def api_load():
             try:
                 if page == "/project-health":
                     _preload_project_health()
+                elif page == "/dead-models":
+                    _preload_dead_models()
                 else:
                     _preload_data_quality()
             except Exception as e:
@@ -329,6 +345,29 @@ def project_health():
         flash(f"Error fetching project health: {e}", "error")
         return redirect(url_for("data_quality"))
     return render_template("project_health.html", creds=creds, summary=summary)
+
+
+@app.route("/dead-models")
+def dead_models():
+    creds = load_credentials()
+    if creds is None:
+        return redirect(url_for("setup"))
+
+    if _needs_loading("/dead-models"):
+        return redirect(url_for("loading", next="/dead-models"))
+
+    client = get_client_from_config()
+    try:
+        from dead_models import fetch_dead_models
+        summary = fetch_dead_models(client)
+    except Exception as e:
+        err = str(e)
+        if any(s in err for s in ("401", "403", "Unauthorized", "Forbidden")):
+            flash("API authentication failed.", "error")
+            return redirect(url_for("setup"))
+        flash(f"Error fetching dead models: {e}", "error")
+        return redirect(url_for("data_quality"))
+    return render_template("dead_models.html", creds=creds, summary=summary)
 
 
 @app.route("/data-quality")
