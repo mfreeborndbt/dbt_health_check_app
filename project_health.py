@@ -199,9 +199,9 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
     run_times = {}
     batch_size = 25
     uids = list(model_uids)
+    batches = [uids[i:i + batch_size] for i in range(0, len(uids), batch_size)]
 
-    for i in range(0, len(uids), batch_size):
-        batch = uids[i:i + batch_size]
+    def _fetch_batch(batch):
         aliases = []
         for j, uid in enumerate(batch):
             safe_uid = uid.replace('"', '\\"')
@@ -217,31 +217,38 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
             "  }\n"
             "}"
         )
-        try:
-            data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
-            applied = data["environment"]["applied"]
-            for j, uid in enumerate(batch):
-                runs = applied.get(f"m{j}") or []
-                times = []
-                for r in runs:
-                    if r.get("status") != "success" or not r.get("executionTime") or r["executionTime"] <= 0:
-                        continue
-                    completed = r.get("executeCompletedAt") or ""
-                    if completed:
-                        try:
-                            dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
-                            if dt < cutoff:
-                                continue
-                        except (ValueError, TypeError):
-                            pass
-                    times.append(r["executionTime"])
-                run_times[uid] = times
-        except Exception as e:
-            print(f"  Batch {i // batch_size} error: {e}")
+        data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
+        applied = data["environment"]["applied"]
+        batch_results = {}
+        for j, uid in enumerate(batch):
+            runs = applied.get(f"m{j}") or []
+            times = []
+            for r in runs:
+                if r.get("status") != "success" or not r.get("executionTime") or r["executionTime"] <= 0:
+                    continue
+                completed = r.get("executeCompletedAt") or ""
+                if completed:
+                    try:
+                        dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                        if dt < cutoff:
+                            continue
+                    except (ValueError, TypeError):
+                        pass
+                times.append(r["executionTime"])
+            batch_results[uid] = times
+        return batch_results
 
-        done = min(i + batch_size, len(uids))
-        if done < len(uids):
-            print(f"  Fetched run times {done}/{len(uids)} models...")
+    done_count = 0
+    with ThreadPoolExecutor(max_workers=6) as executor:
+        futures = {executor.submit(_fetch_batch, batch): batch for batch in batches}
+        for future in as_completed(futures):
+            try:
+                run_times.update(future.result())
+            except Exception as e:
+                print(f"  Batch error: {e}")
+            done_count += len(futures[future])
+            if done_count < len(uids):
+                print(f"  Fetched run times {done_count}/{len(uids)} models...")
 
     db_set(f"api:{key}", run_times)
     print(f"[{client.name}] Fetched run times for {len(run_times)} models")
@@ -251,13 +258,13 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
 def _fetch_model_run_stats(client: DbtClient, model_uids):
     """Fetch execution times AND row counts from modelHistoricalRuns with stats.
 
+    Uses parallel workers to speed up batch fetching.
     Returns dict: uid -> {
-        "times": [float], "row_counts": [(date_str, int)],
-        "earliest_rows": int|None, "latest_rows": int|None,
+        "times": [float], "earliest_rows": int|None, "latest_rows": int|None,
         "row_delta": int|None, "avg_new_rows": float|None,
     }
     """
-    key = _cache_key("ph_runstats_v2", client.account_id, client.environment_id)
+    key = _cache_key("ph_runstats_v3", client.account_id, client.environment_id)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         return cached
@@ -266,17 +273,17 @@ def _fetch_model_run_stats(client: DbtClient, model_uids):
     cutoff = datetime.now(timezone.utc) - timedelta(days=30)
 
     print(f"[{client.name}] Fetching model run stats (times + rows) for {len(model_uids)} models...")
-    results = {}
-    batch_size = 10
     uids = list(model_uids)
+    batch_size = 10
+    batches = [uids[i:i + batch_size] for i in range(0, len(uids), batch_size)]
+    results = {}
 
-    for i in range(0, len(uids), batch_size):
-        batch = uids[i:i + batch_size]
+    def _fetch_batch(batch):
         aliases = []
         for j, uid in enumerate(batch):
             safe_uid = uid.replace('"', '\\"')
             aliases.append(
-                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 50) '
+                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 100) '
                 f'{{ uniqueId executionTime status executeCompletedAt stats {{ id value }} }}'
             )
         gql = (
@@ -288,60 +295,66 @@ def _fetch_model_run_stats(client: DbtClient, model_uids):
             "  }\n"
             "}"
         )
-        try:
-            data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
-            applied = data["environment"]["applied"]
-            for j, uid in enumerate(batch):
-                runs = applied.get(f"m{j}") or []
-                times = []
-                row_counts = []
-                for r in runs:
-                    if r.get("status") != "success":
-                        continue
-                    completed = r.get("executeCompletedAt") or ""
-                    in_window = True
-                    if completed:
-                        try:
-                            dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
-                            if dt < cutoff:
-                                in_window = False
-                        except (ValueError, TypeError):
-                            pass
+        data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
+        applied = data["environment"]["applied"]
+        batch_results = {}
+        for j, uid in enumerate(batch):
+            runs = applied.get(f"m{j}") or []
+            times = []
+            row_counts = []
+            for r in runs:
+                if r.get("status") != "success":
+                    continue
+                completed = r.get("executeCompletedAt") or ""
+                in_window = True
+                if completed:
+                    try:
+                        dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
+                        if dt < cutoff:
+                            in_window = False
+                    except (ValueError, TypeError):
+                        pass
 
-                    if in_window and r.get("executionTime") and r["executionTime"] > 0:
-                        times.append(r["executionTime"])
+                if in_window and r.get("executionTime") and r["executionTime"] > 0:
+                    times.append(r["executionTime"])
 
-                    # Row counts from stats
-                    if in_window:
-                        stats = {s["id"]: s["value"] for s in (r.get("stats") or [])}
-                        rc = stats.get("row_count") or stats.get("rows_affected") or stats.get("num_rows")
-                        if rc is not None:
-                            try:
-                                row_counts.append((completed, int(float(rc))))
-                            except (ValueError, TypeError):
-                                pass
+                # Row counts from stats — check all known stat keys
+                stat_map = {s["id"]: s["value"] for s in (r.get("stats") or [])}
+                rc = stat_map.get("row_count") or stat_map.get("rows_affected") or stat_map.get("num_rows") or stat_map.get("num_rows_updated") or stat_map.get("num_rows_inserted")
+                if rc is not None:
+                    try:
+                        row_counts.append((completed or "", int(float(rc))))
+                    except (ValueError, TypeError):
+                        pass
 
-                row_counts.sort(key=lambda x: x[0])
-                earliest = row_counts[0][1] if row_counts else None
-                latest = row_counts[-1][1] if row_counts else None
-                delta = (latest - earliest) if (latest is not None and earliest is not None) else None
-                total_runs = len(times)
-                avg_new = (delta / total_runs) if (delta is not None and total_runs > 0) else None
+            row_counts.sort(key=lambda x: x[0])
+            earliest = row_counts[0][1] if row_counts else None
+            latest = row_counts[-1][1] if row_counts else None
+            delta = (latest - earliest) if (latest is not None and earliest is not None) else None
+            total_runs = len(times)
+            avg_new = (delta / total_runs) if (delta is not None and total_runs > 0) else None
 
-                results[uid] = {
-                    "times": times,
-                    "row_counts": row_counts,
-                    "earliest_rows": earliest,
-                    "latest_rows": latest,
-                    "row_delta": delta,
-                    "avg_new_rows": round(avg_new, 1) if avg_new is not None else None,
-                }
-        except Exception as e:
-            print(f"  Batch {i // batch_size} error: {e}")
+            batch_results[uid] = {
+                "times": times,
+                "earliest_rows": earliest,
+                "latest_rows": latest,
+                "row_delta": delta,
+                "avg_new_rows": round(avg_new, 1) if avg_new is not None else None,
+            }
+        return batch_results
 
-        done = min(i + batch_size, len(uids))
-        if done < len(uids):
-            print(f"  Fetched run stats {done}/{len(uids)} models...")
+    done_count = 0
+    with ThreadPoolExecutor(max_workers=4) as executor:
+        futures = {executor.submit(_fetch_batch, batch): batch for batch in batches}
+        for future in as_completed(futures):
+            try:
+                batch_results = future.result()
+                results.update(batch_results)
+            except Exception as e:
+                print(f"  Batch error: {e}")
+            done_count += len(futures[future])
+            if done_count < len(uids):
+                print(f"  Fetched run stats {done_count}/{len(uids)} models...")
 
     db_set(f"api:{key}", results)
     print(f"[{client.name}] Fetched run stats for {len(results)} models")
