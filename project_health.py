@@ -257,7 +257,7 @@ def _fetch_model_run_stats(client: DbtClient, model_uids):
         "row_delta": int|None, "avg_new_rows": float|None,
     }
     """
-    key = _cache_key("ph_runstats_v1", client.account_id, client.environment_id)
+    key = _cache_key("ph_runstats_v2", client.account_id, client.environment_id)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         return cached
@@ -267,7 +267,7 @@ def _fetch_model_run_stats(client: DbtClient, model_uids):
 
     print(f"[{client.name}] Fetching model run stats (times + rows) for {len(model_uids)} models...")
     results = {}
-    batch_size = 25
+    batch_size = 10
     uids = list(model_uids)
 
     for i in range(0, len(uids), batch_size):
@@ -276,7 +276,7 @@ def _fetch_model_run_stats(client: DbtClient, model_uids):
         for j, uid in enumerate(batch):
             safe_uid = uid.replace('"', '\\"')
             aliases.append(
-                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 200) '
+                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 50) '
                 f'{{ uniqueId executionTime status executeCompletedAt stats {{ id value }} }}'
             )
         gql = (

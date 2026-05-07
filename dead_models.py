@@ -105,9 +105,6 @@ def fetch_dead_models(client: DbtClient):
     # --- Query counts ---
     query_counts = _fetch_model_usage_query_counts(client)
 
-    # --- Run stats (times + row counts) ---
-    run_stats = _fetch_model_run_stats(client, [m["uniqueId"] for m in models])
-
     # --- BFS pruning from leaves upward ---
     print(f"[{client.name}] Identifying dead model candidates...")
     all_uids = set(model_map.keys())
@@ -145,7 +142,10 @@ def fetch_dead_models(client: DbtClient):
             if parent_uid not in visited:
                 queue.append(parent_uid)
 
-    # --- Build results with project-health metadata ---
+    # --- Fetch run stats only for candidates (not all 1664 models) ---
+    run_stats = _fetch_model_run_stats(client, list(candidates))
+
+    # --- Build results ---
     print(f"[{client.name}] Building metadata for {len(candidates)} candidates...")
     results = []
     downstream_counts, upstream_counts, _ = _fetch_dependency_counts(client)
