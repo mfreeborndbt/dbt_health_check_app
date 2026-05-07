@@ -16,7 +16,7 @@ app.secret_key = "dbt-health-check-key"
 def _fmt_time(seconds):
     """Format seconds into human-readable time."""
     if seconds is None or seconds < 0:
-        return "—"
+        return "\u2014"
     s = float(seconds)
     if s < 60:
         return f"{s:.1f}s"
@@ -53,8 +53,7 @@ class LogTee:
         return getattr(self.original, name)
 
 
-def _preload_data_quality():
-    """Run data loading, warming caches."""
+def _preload_observability():
     creds = load_credentials()
     if creds is None:
         raise Exception("Not configured")
@@ -62,8 +61,7 @@ def _preload_data_quality():
     fetch_data_quality_summary(client, days=30)
 
 
-def _preload_project_health():
-    """Run project health loading, warming caches."""
+def _preload_best_practices():
     creds = load_credentials()
     if creds is None:
         raise Exception("Not configured")
@@ -73,13 +71,21 @@ def _preload_project_health():
 
 
 def _preload_dead_models():
-    """Run dead models loading, warming caches."""
     creds = load_credentials()
     if creds is None:
         raise Exception("Not configured")
     client = get_client_from_config()
     from dead_models import fetch_dead_models
     fetch_dead_models(client)
+
+
+def _preload_incremental_candidates():
+    creds = load_credentials()
+    if creds is None:
+        raise Exception("Not configured")
+    client = get_client_from_config()
+    from incremental_candidates import fetch_incremental_candidates
+    fetch_incremental_candidates(client)
 
 
 def _invalidate_summary():
@@ -111,7 +117,7 @@ def index():
     creds = load_credentials()
     if creds is None:
         return redirect(url_for("setup"))
-    return redirect(url_for("data_quality"))
+    return redirect(url_for("observability"))
 
 
 @app.route("/setup")
@@ -140,7 +146,6 @@ def setup_save():
     existing = load_credentials()
     if not data["token"] and existing:
         data["token"] = existing["token"]
-    # Preserve config settings across connection saves
     if existing:
         for k in (
             "high_impact_tags",
@@ -166,7 +171,7 @@ def setup_save():
         client.test_connection()
         save_credentials(data)
         flash("Connection successful! Credentials saved.", "success")
-        return redirect(url_for("data_quality"))
+        return redirect(url_for("observability"))
     except Exception as e:
         flash(f"Connection failed: {e}", "error")
         save_credentials(data)
@@ -186,7 +191,7 @@ def setup_clear():
 
 
 # ---------------------------------------------------------------------------
-# High Impact Config (separate tab)
+# High Impact Config
 # ---------------------------------------------------------------------------
 
 @app.route("/config")
@@ -242,35 +247,38 @@ def config_save():
 
 
 # ---------------------------------------------------------------------------
-# Loading + Data Quality
+# Loading
 # ---------------------------------------------------------------------------
 
-def _needs_loading(page="/data-quality"):
-    """Check if we should redirect to the loading page (cache is cold)."""
+def _needs_loading(page="/observability"):
     creds = load_credentials()
     if creds is None:
         return False
     client = get_client_from_config()
     if client is None:
         return False
-    if page == "/project-health":
+    if page == "/best-practices":
         from project_health import is_project_health_cached
         return not is_project_health_cached(client)
     if page == "/dead-models":
         from dead_models import is_dead_models_cached
         return not is_dead_models_cached(client)
+    if page == "/incremental-candidates":
+        from incremental_candidates import is_incremental_candidates_cached
+        return not is_incremental_candidates_cached(client)
     return not is_summary_cached(client)
 
 
 @app.route("/loading")
 def loading():
-    next_page = request.args.get("next", "/data-quality")
+    next_page = request.args.get("next", "/observability")
     creds = load_credentials()
     project_name = creds.get("name", "Project") if creds else "Project"
     page_names = {
-        "/data-quality": "Data Quality",
-        "/project-health": "Project Health",
+        "/observability": "Observability",
+        "/best-practices": "Best Practice Checks",
         "/dead-models": "Dead Models",
+        "/incremental-candidates": "Incremental Candidates",
     }
     page_name = page_names.get(next_page, next_page)
     return render_template("loading.html", next_page=next_page, page_name=page_name, project_name=project_name)
@@ -278,7 +286,7 @@ def loading():
 
 @app.route("/api/load")
 def api_load():
-    page = request.args.get("page", "/data-quality")
+    page = request.args.get("page", "/observability")
 
     def generate():
         q = queue.Queue()
@@ -288,18 +296,20 @@ def api_load():
             old_stdout = sys.stdout
             sys.stdout = LogTee(old_stdout, q)
             try:
-                if page == "/project-health":
-                    _preload_project_health()
+                if page == "/best-practices":
+                    _preload_best_practices()
                 elif page == "/dead-models":
                     _preload_dead_models()
+                elif page == "/incremental-candidates":
+                    _preload_incremental_candidates()
                 else:
-                    _preload_data_quality()
+                    _preload_observability()
             except Exception as e:
                 result["status"] = "error"
                 result["error"] = str(e)
             finally:
                 sys.stdout = old_stdout
-                q.put(None)  # sentinel
+                q.put(None)
 
         thread = threading.Thread(target=do_load, daemon=True)
         thread.start()
@@ -324,14 +334,48 @@ def api_load():
     )
 
 
-@app.route("/project-health")
-def project_health():
+# ---------------------------------------------------------------------------
+# Tab routes
+# ---------------------------------------------------------------------------
+
+@app.route("/observability")
+def observability():
     creds = load_credentials()
     if creds is None:
         return redirect(url_for("setup"))
 
-    if _needs_loading("/project-health"):
-        return redirect(url_for("loading", next="/project-health"))
+    if _needs_loading():
+        return redirect(url_for("loading", next="/observability"))
+
+    client = get_client_from_config()
+    try:
+        summary = fetch_data_quality_summary(client, days=30)
+    except Exception as e:
+        err = str(e)
+        if any(s in err for s in ("401", "403", "Unauthorized", "Forbidden")):
+            flash("API authentication failed. Please update your service token.", "error")
+            return redirect(url_for("setup"))
+        if "429" in err or "Too Many" in err:
+            flash("Rate limited by dbt Cloud API. Please wait a moment and try again.", "error")
+            return redirect(url_for("setup"))
+        flash(f"Error fetching data: {e}", "error")
+        return redirect(url_for("setup"))
+
+    return render_template(
+        "observability.html",
+        creds=creds,
+        summary=summary,
+    )
+
+
+@app.route("/best-practices")
+def best_practices():
+    creds = load_credentials()
+    if creds is None:
+        return redirect(url_for("setup"))
+
+    if _needs_loading("/best-practices"):
+        return redirect(url_for("loading", next="/best-practices"))
 
     client = get_client_from_config()
     try:
@@ -343,8 +387,8 @@ def project_health():
             flash("API authentication failed.", "error")
             return redirect(url_for("setup"))
         flash(f"Error fetching project health: {e}", "error")
-        return redirect(url_for("data_quality"))
-    return render_template("project_health.html", creds=creds, summary=summary)
+        return redirect(url_for("observability"))
+    return render_template("best_practices.html", creds=creds, summary=summary)
 
 
 @app.route("/dead-models")
@@ -366,38 +410,31 @@ def dead_models():
             flash("API authentication failed.", "error")
             return redirect(url_for("setup"))
         flash(f"Error fetching dead models: {e}", "error")
-        return redirect(url_for("data_quality"))
+        return redirect(url_for("observability"))
     return render_template("dead_models.html", creds=creds, summary=summary)
 
 
-@app.route("/data-quality")
-def data_quality():
+@app.route("/incremental-candidates")
+def incremental_candidates():
     creds = load_credentials()
     if creds is None:
         return redirect(url_for("setup"))
 
-    if _needs_loading():
-        return redirect(url_for("loading", next="/data-quality"))
+    if _needs_loading("/incremental-candidates"):
+        return redirect(url_for("loading", next="/incremental-candidates"))
 
     client = get_client_from_config()
     try:
-        summary = fetch_data_quality_summary(client, days=30)
+        from incremental_candidates import fetch_incremental_candidates
+        summary = fetch_incremental_candidates(client)
     except Exception as e:
         err = str(e)
         if any(s in err for s in ("401", "403", "Unauthorized", "Forbidden")):
-            flash("API authentication failed. Please update your service token.", "error")
+            flash("API authentication failed.", "error")
             return redirect(url_for("setup"))
-        if "429" in err or "Too Many" in err:
-            flash("Rate limited by dbt Cloud API. Please wait a moment and try again.", "error")
-            return redirect(url_for("setup"))
-        flash(f"Error fetching data: {e}", "error")
-        return redirect(url_for("setup"))
-
-    return render_template(
-        "data_quality.html",
-        creds=creds,
-        summary=summary,
-    )
+        flash(f"Error fetching incremental candidates: {e}", "error")
+        return redirect(url_for("observability"))
+    return render_template("incremental_candidates.html", creds=creds, summary=summary)
 
 
 if __name__ == "__main__":

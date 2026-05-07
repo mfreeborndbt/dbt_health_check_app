@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Dead Models — dbt Health Check</title>
+  <title>Incremental Candidates — dbt Health Check</title>
   <link rel="icon" href="data:image/svg+xml,<svg xmlns=%22http://www.w3.org/2000/svg%22 viewBox=%220 0 100 100%22><rect width=%22100%22 height=%22100%22 rx=%2218%22 fill=%22%2334d399%22/><text y=%2272%22 x=%2250%22 text-anchor=%22middle%22 font-size=%2258%22 font-family=%22system-ui%22 font-weight=%22700%22 fill=%22white%22>H</text></svg>">
   <style>
     :root { --bg:#0f1117;--surface:#1a1d27;--border:#2a2d3a;--text:#e1e4ed;--text-muted:#8b8fa3;--accent:#34d399;--green:#34d399;--red:#f87171;--orange:#fbbf24;--blue:#60a5fa; }
@@ -21,7 +21,7 @@
     .summary-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.25rem; }
     .summary-card .label { font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.5rem; }
     .summary-card .value { font-size:1.8rem;font-weight:700; } .summary-card .detail { font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem; }
-    .value-green { color:var(--green); } .value-red { color:var(--red); } .value-orange { color:var(--orange); }
+    .value-green { color:var(--green); } .value-red { color:var(--red); } .value-orange { color:var(--orange); } .value-blue { color:var(--blue); }
     .table-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem; }
     .table-card h2 { font-size:0.95rem;font-weight:600;margin-bottom:0.5rem; }
     .table-desc { font-size:0.78rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.5; }
@@ -36,8 +36,8 @@
     .badge { display:inline-block;padding:0.1rem 0.35rem;border-radius:3px;font-size:0.65rem;font-weight:600; }
     .badge-pass { background:rgba(52,211,153,0.15);color:var(--green); }
     .badge-fail { background:rgba(248,113,113,0.15);color:var(--red); }
-    .badge-leaf { background:rgba(248,113,113,0.15);color:var(--red); }
-    .badge-upstream { background:rgba(251,191,36,0.15);color:var(--orange); }
+    .badge-warn { background:rgba(251,191,36,0.15);color:var(--orange); }
+    .badge-hi { background:rgba(96,165,250,0.15);color:var(--blue); }
     .badge-na { background:rgba(139,143,163,0.08);color:var(--text-muted); }
     .muted-num { color:var(--text-muted); }
     .filter-bar { display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;align-items:center; }
@@ -47,16 +47,22 @@
     .fbtn.active { background:rgba(96,165,250,0.15);border-color:var(--blue);color:var(--blue); }
     .search-box { background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.75rem;color:var(--text);font-size:0.8rem;font-family:inherit;width:220px; }
     .search-box:focus { border-color:var(--accent);outline:none; }
+    .readiness { display:inline-flex;gap:2px; }
+    .readiness-dot { width:8px;height:8px;border-radius:50%;background:var(--border); }
+    .readiness-dot.filled { background:var(--green); }
+    .readiness-dot.partial { background:var(--orange); }
     .empty-state { text-align:center;padding:3rem 2rem;color:var(--text-muted); }
     .empty-state h3 { font-size:1.1rem;margin-bottom:0.5rem;color:var(--text); }
+    .warn-tag { display:inline-block;padding:0.05rem 0.3rem;border-radius:3px;font-size:0.6rem;font-weight:500;background:rgba(251,191,36,0.1);color:var(--orange);margin:0 0.1rem; }
+    .hi-tag { display:inline-block;padding:0.05rem 0.3rem;border-radius:3px;font-size:0.6rem;font-weight:500;background:rgba(96,165,250,0.1);color:var(--blue);margin:0 0.1rem; }
   </style>
 </head>
 <body>
   <nav class="tab-nav">
     <a href="/observability" class="tab">Observability</a>
     <a href="/best-practices" class="tab">Best Practice Checks</a>
-    <a href="/dead-models" class="tab active">Dead Models</a>
-    <a href="/incremental-candidates" class="tab">Incremental Candidates</a>
+    <a href="/dead-models" class="tab">Dead Models</a>
+    <a href="/incremental-candidates" class="tab active">Incremental Candidates</a>
     <span class="tab-spacer"></span>
     <span class="tab-sep"></span>
     <a href="/config" class="tab-link">High Impact Config</a>
@@ -64,8 +70,8 @@
     <a href="/setup" class="tab-link">&#9881; Settings</a>
   </nav>
   <header>
-    <h1><span>&#9642;</span> Dead Models</h1>
-    <div class="subtitle">Potentially unused models — no downstream deps, low query volume, no exposures or semantic models &mdash; {{ creds.name or creds.account_prefix }}</div>
+    <h1><span>&#9642;</span> Incremental Candidates</h1>
+    <div class="subtitle">Table-materialized models that may benefit from incremental materialization &mdash; {{ creds.name or creds.account_prefix }}</div>
   </header>
 
   <div class="summary-grid">
@@ -74,100 +80,111 @@
       <div class="value">{{ summary.total_models }}</div>
     </div>
     <div class="summary-card">
-      <div class="label">Dead Candidates</div>
-      <div class="value value-red">{{ summary.candidate_count }}</div>
-      <div class="detail">{{ '%0.0f' | format(summary.candidate_count / summary.total_models * 100) if summary.total_models else 0 }}% of project</div>
+      <div class="label">Table Models</div>
+      <div class="value value-orange">{{ summary.table_count }}</div>
+      <div class="detail">candidates for incremental</div>
     </div>
     <div class="summary-card">
-      <div class="label">Leaf (no children)</div>
-      <div class="value value-red">{{ summary.leaf_count }}</div>
-      <div class="detail">terminal dead-end models</div>
+      <div class="label">High Impact</div>
+      <div class="value value-blue">{{ summary.high_impact_count }}</div>
+      <div class="detail">table models flagged high-impact</div>
     </div>
     <div class="summary-card">
-      <div class="label">Upstream Dead</div>
-      <div class="value value-orange">{{ summary.upstream_count }}</div>
-      <div class="detail">feed only dead models</div>
+      <div class="label">Ready (3+ signals)</div>
+      <div class="value value-green">{{ summary.ready_count }}</div>
+      <div class="detail">have PK + date column</div>
     </div>
   </div>
 
   <div class="table-card">
-    <h2>Dead Model Candidates</h2>
+    <h2>Table Models — Incremental Readiness</h2>
     <div class="table-desc">
-      A model is flagged when it has <strong>no downstream model dependents</strong> (or all its dependents are also dead),
-      <strong>&le; {{ summary.query_threshold }} warehouse queries</strong> in the past month, and
-      <strong>no exposures or semantic models</strong> reference it.
-      Starting from leaf nodes, the analysis walks upstream to find chains of dead models.
+      Table models sorted by high-impact status and execution time. <strong>Readiness</strong> is based on:
+      date/timestamp column presence, primary key (tested or config), and PK candidate columns.
+      <strong>Warnings</strong> flag complexity that may make incremental conversion harder (window functions, GROUP BY, UNIONs, custom macros).
     </div>
 
     {% if summary.candidates %}
     <div class="filter-bar">
-      <span class="flabel">Type:</span>
-      <button class="fbtn active" onclick="filterType('all',this)">All ({{ summary.candidate_count }})</button>
-      <button class="fbtn" onclick="filterType('leaf',this)">Leaf ({{ summary.leaf_count }})</button>
-      <button class="fbtn" onclick="filterType('upstream',this)">Upstream ({{ summary.upstream_count }})</button>
+      <span class="flabel">Filter:</span>
+      <button class="fbtn active" onclick="filterImpact('all',this)">All ({{ summary.table_count }})</button>
+      <button class="fbtn" onclick="filterImpact('hi',this)">High Impact ({{ summary.high_impact_count }})</button>
+      <button class="fbtn" onclick="filterImpact('ready',this)">Ready ({{ summary.ready_count }})</button>
       <span style="width:1px;height:1rem;background:var(--border);margin:0 0.3rem;"></span>
-      <span class="flabel">Layer:</span>
-      <button class="fbtn" onclick="filterLayer('staging',this)">Staging</button>
-      <button class="fbtn" onclick="filterLayer('intermediate',this)">Intermediate</button>
-      <button class="fbtn" onclick="filterLayer('marts',this)">Marts</button>
-      <button class="fbtn" onclick="filterLayer('other',this)">Other</button>
+      <span class="flabel">Hide:</span>
+      <button class="fbtn" onclick="toggleHide('winfn',this)">Window Fns</button>
+      <button class="fbtn" onclick="toggleHide('groupby',this)">GROUP BY</button>
+      <button class="fbtn" onclick="toggleHide('unions',this)">UNIONs</button>
+      <button class="fbtn" onclick="toggleHide('macros',this)">Macros</button>
       <span style="flex:1;"></span>
       <input type="text" class="search-box" id="searchBox" placeholder="Search models..." oninput="applyFilters()">
-      <span class="muted-num" style="font-size:0.72rem;" id="rowCount">{{ summary.candidate_count }} models</span>
+      <span class="muted-num" style="font-size:0.72rem;" id="rowCount">{{ summary.table_count }} models</span>
     </div>
 
     <div style="overflow-x:auto;">
-    <table id="deadTable">
+    <table id="icTable">
       <thead>
         <tr>
           <th class="sortable" data-col="0" data-type="text">Model</th>
           <th class="sortable" data-col="1" data-type="text">Layer</th>
-          <th class="sortable" data-col="2" data-type="text">Type</th>
-          <th class="sortable" data-col="3" data-type="text">Materialization</th>
-          <th class="sortable" data-col="4" data-type="num" title="Warehouse queries in the past month">Queries</th>
-          <th class="sortable" data-col="5" data-type="num" title="Successful runs in past 30 days">Runs</th>
-          <th class="sortable" data-col="6" data-type="num" title="Median build time (30d)">Median Time</th>
-          <th class="sortable" data-col="7" data-type="num" title="Total transitive downstream models">Downstream</th>
-          <th class="sortable" data-col="8" data-type="text" title="Modeling rules pass/total">Modeling</th>
-          <th class="sortable" data-col="9" data-type="text" title="Testing rules">Testing</th>
-          <th class="sortable" data-col="10" data-type="text" title="Has description">Docs</th>
+          <th class="sortable" data-col="2" data-type="num">Readiness</th>
+          <th class="sortable" data-col="3" data-type="text">High Impact</th>
+          <th class="sortable" data-col="4" data-type="text">Date Column</th>
+          <th class="sortable" data-col="5" data-type="text">Primary Key</th>
+          <th class="sortable" data-col="6" data-type="num" title="Successful runs in past 30 days">Runs</th>
+          <th class="sortable" data-col="7" data-type="num" title="Average build time">Avg Time</th>
+          <th class="sortable" data-col="8" data-type="num" title="p95 build time">p95 Time</th>
+          <th class="sortable" data-col="9" data-type="num" title="Warehouse queries in past month">Queries</th>
+          <th class="sortable" data-col="10" data-type="num" title="Total downstream models">Downstream</th>
+          <th class="sortable" data-col="11" data-type="text">Warnings</th>
         </tr>
       </thead>
       <tbody>
         {% for m in summary.candidates %}
-        <tr data-type="{{ 'leaf' if m.is_leaf else 'upstream' }}" data-layer="{{ m.layer }}" data-name="{{ m.name|lower }}">
+        <tr data-name="{{ m.name|lower }}"
+            data-hi="{{ '1' if m.is_high_impact else '0' }}"
+            data-readiness="{{ m.readiness }}"
+            data-winfn="{{ m.window_fns }}"
+            data-groupby="{{ m.group_bys }}"
+            data-unions="{{ m.unions }}"
+            data-macros="{{ '1' if m.has_custom_macros else '0' }}">
           <td>
             <div class="model-name">{{ m.name }}</div>
             <div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.1rem;">{{ m.folder }}{% if m.subfolder %}/{{ m.subfolder }}{% endif %}</div>
           </td>
           <td style="font-size:0.72rem;">{{ m.layer }}</td>
-          <td>
-            {% if m.is_leaf %}
-            <span class="badge badge-leaf">Leaf</span>
-            {% else %}
-            <span class="badge badge-upstream">Upstream</span>
-            <span style="font-size:0.62rem;color:var(--text-muted);"> ({{ m.dead_children_count }}/{{ m.direct_children_count }})</span>
-            {% endif %}
+          <td data-val="{{ m.readiness }}">
+            <div class="readiness" title="Readiness {{ m.readiness }}/5">
+              {% for i in range(5) %}
+              <div class="readiness-dot {% if i < m.readiness %}{% if m.readiness >= 3 %}filled{% else %}partial{% endif %}{% endif %}"></div>
+              {% endfor %}
+            </div>
           </td>
-          <td style="font-size:0.72rem;">{{ m.materialization or '—' }}</td>
-          <td>{% if m.query_count > 0 %}<span style="color:var(--orange);">{{ m.query_count }}</span>{% else %}<span class="muted-num">0</span>{% endif %}</td>
+          <td>
+            {% if m.is_high_impact %}
+            {% for r in m.hi_reasons %}<span class="hi-tag">{{ r }}</span>{% endfor %}
+            {% else %}<span class="muted-num">--</span>{% endif %}
+          </td>
+          <td>
+            {% if m.has_date_column %}<span class="badge badge-pass">{{ m.date_type or 'Yes' }}</span>{% else %}<span class="badge badge-na">No</span>{% endif %}
+          </td>
+          <td>
+            {% if m.pk_columns_from_tests %}
+            <span class="badge badge-pass" title="{{ m.pk_columns_from_tests | join(', ') }}">{{ m.pk_columns_from_tests | join(', ') }}</span>
+            {% elif m.unique_key %}
+            <span class="badge badge-pass" title="unique_key config">{{ m.unique_key if m.unique_key is string else m.unique_key | join(', ') }}</span>
+            {% elif m.pk_value_cols %}
+            <span class="badge badge-warn" title="Potential PK columns: {{ m.pk_value_cols | join(', ') }}">{{ m.pk_value_cols[0] }}{% if m.pk_value_cols | length > 1 %} +{{ m.pk_value_cols | length - 1 }}{% endif %}</span>
+            {% else %}<span class="badge badge-na">None</span>{% endif %}
+          </td>
           <td>{{ m.run_count }}</td>
-          <td>{% if m.performance %}{{ fmtTime(m.performance.median) }}{% else %}<span class="muted-num">—</span>{% endif %}</td>
-          <td>{{ m.downstream_count }}</td>
+          <td data-val="{{ m.performance.avg or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.avg) }}{% else %}<span class="muted-num">--</span>{% endif %}</td>
+          <td data-val="{{ m.performance.p95 or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.p95) }}{% else %}<span class="muted-num">--</span>{% endif %}</td>
+          <td>{% if m.query_count > 0 %}{{ m.query_count }}{% else %}<span class="muted-num">0</span>{% endif %}</td>
+          <td data-val="{{ m.downstream_count }}">{{ m.downstream_count }}</td>
           <td>
-            {% if m.modeling_total_count > 0 %}
-            <span class="badge {% if m.modeling_pass_count == m.modeling_total_count %}badge-pass{% elif m.modeling_pass_count == 0 %}badge-fail{% else %}badge-na{% endif %}">{{ m.modeling_pass_count }}/{{ m.modeling_total_count }}</span>
-            {% else %}<span class="muted-num">—</span>{% endif %}
-          </td>
-          <td>
-            {% if m.testing.has_test %}<span class="badge badge-pass">{{ m.testing.total_test_count }} tests</span>{% else %}<span class="badge badge-fail">None</span>{% endif %}
-            {% if m.testing.primary_key_test %}<span class="badge badge-pass" style="margin-left:0.15rem;">PK</span>{% endif %}
-          </td>
-          <td>
-            {% if m.documentation.has_description %}<span class="badge badge-pass">Yes</span>{% else %}<span class="badge badge-fail">No</span>{% endif %}
-            {% if m.documentation.columns_total > 0 %}
-            <span style="font-size:0.62rem;color:var(--text-muted);margin-left:0.15rem;">{{ m.documentation.columns_documented }}/{{ m.documentation.columns_total }} cols</span>
-            {% endif %}
+            {% for w in m.warnings %}<span class="warn-tag">{{ w }}</span>{% endfor %}
+            {% if not m.warnings %}<span class="muted-num">--</span>{% endif %}
           </td>
         </tr>
         {% endfor %}
@@ -176,47 +193,45 @@
     </div>
     {% else %}
     <div class="empty-state">
-      <h3>No dead models found</h3>
-      <p>All models have downstream dependencies, significant query volume, or exposure/semantic model references.</p>
+      <h3>No table models found</h3>
+      <p>No table-materialized models were found in this environment.</p>
     </div>
     {% endif %}
   </div>
 
 <script>
-var activeType = 'all';
-var activeLayer = null;
+var activeImpact = 'all';
+var hideFlags = { winfn: false, groupby: false, unions: false, macros: false };
 
-function filterType(type, btn) {
-  activeType = type;
+function filterImpact(type, btn) {
+  activeImpact = type;
   document.querySelectorAll('.filter-bar .fbtn').forEach(function(b) {
-    if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf('filterType') === 0) b.classList.remove('active');
+    if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf('filterImpact') === 0) b.classList.remove('active');
   });
   btn.classList.add('active');
   applyFilters();
 }
 
-function filterLayer(layer, btn) {
-  if (activeLayer === layer) {
-    activeLayer = null;
-    btn.classList.remove('active');
-  } else {
-    activeLayer = layer;
-    document.querySelectorAll('.filter-bar .fbtn').forEach(function(b) {
-      if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf('filterLayer') === 0) b.classList.remove('active');
-    });
-    btn.classList.add('active');
-  }
+function toggleHide(flag, btn) {
+  hideFlags[flag] = !hideFlags[flag];
+  btn.classList.toggle('active', hideFlags[flag]);
   applyFilters();
 }
 
 function applyFilters() {
   var search = (document.getElementById('searchBox').value || '').toLowerCase();
   var visible = 0;
-  document.querySelectorAll('#deadTable tbody tr').forEach(function(row) {
-    var matchType = activeType === 'all' || row.dataset.type === activeType;
-    var matchLayer = !activeLayer || row.dataset.layer === activeLayer;
+  document.querySelectorAll('#icTable tbody tr').forEach(function(row) {
+    var matchImpact = activeImpact === 'all'
+      || (activeImpact === 'hi' && row.dataset.hi === '1')
+      || (activeImpact === 'ready' && parseInt(row.dataset.readiness) >= 3);
     var matchSearch = !search || row.dataset.name.indexOf(search) !== -1;
-    var show = matchType && matchLayer && matchSearch;
+    var hidden = false;
+    if (hideFlags.winfn && parseInt(row.dataset.winfn) > 0) hidden = true;
+    if (hideFlags.groupby && parseInt(row.dataset.groupby) > 0) hidden = true;
+    if (hideFlags.unions && parseInt(row.dataset.unions) > 0) hidden = true;
+    if (hideFlags.macros && row.dataset.macros === '1') hidden = true;
+    var show = matchImpact && matchSearch && !hidden;
     row.style.display = show ? '' : 'none';
     if (show) visible++;
   });
@@ -225,7 +240,7 @@ function applyFilters() {
 
 document.querySelectorAll('th.sortable').forEach(function(th) {
   th.addEventListener('click', function() {
-    var table = document.getElementById('deadTable');
+    var table = document.getElementById('icTable');
     if (!table) return;
     var tbody = table.querySelector('tbody');
     var rows = Array.from(tbody.querySelectorAll('tr'));
@@ -235,12 +250,11 @@ document.querySelectorAll('th.sortable').forEach(function(th) {
     table.querySelectorAll('th.sortable').forEach(function(h) { h.classList.remove('sort-asc','sort-desc'); });
     th.classList.add(asc ? 'sort-asc' : 'sort-desc');
     rows.sort(function(a, b) {
-      var av = a.children[col].textContent.trim();
-      var bv = b.children[col].textContent.trim();
+      var av, bv;
       if (type === 'num') {
-        av = parseFloat(av.replace(/[^0-9.\-]/g, '')) || 0;
-        bv = parseFloat(bv.replace(/[^0-9.\-]/g, '')) || 0;
-      } else { av = av.toLowerCase(); bv = bv.toLowerCase(); }
+        av = parseFloat(a.children[col].dataset.val || a.children[col].textContent.replace(/[^0-9.\-]/g, '')) || 0;
+        bv = parseFloat(b.children[col].dataset.val || b.children[col].textContent.replace(/[^0-9.\-]/g, '')) || 0;
+      } else { av = a.children[col].textContent.trim().toLowerCase(); bv = b.children[col].textContent.trim().toLowerCase(); }
       if (av < bv) return asc ? -1 : 1;
       if (av > bv) return asc ? 1 : -1;
       return 0;

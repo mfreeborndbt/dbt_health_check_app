@@ -37,7 +37,7 @@ Already cloned? Just run `python3 run.py` again — it always works.
 ## After it starts
 
 1. Open **Settings** and enter your dbt Cloud connection fields (see below).
-2. Use the **Data Quality**, **Project Health**, and **Dead Models** tabs.
+2. Use the **Observability**, **Best Practice Checks**, **Dead Models**, and **Incremental Candidates** tabs.
 3. Tune **High Impact Config** as needed.
 
 Credentials are stored locally in `config/credentials.json` (gitignored).
