@@ -17,44 +17,46 @@
     .tab-link { padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-muted);text-decoration:none; } .tab-link:hover { color:var(--accent);text-decoration:none; }
     header h1 { font-size:1.5rem;font-weight:600; } header h1 span { color:var(--accent); }
     .subtitle { color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem; }
-    .summary-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1.5rem 0; }
-    .summary-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.25rem; }
-    .summary-card .label { font-size:0.72rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);margin-bottom:0.5rem; }
-    .summary-card .value { font-size:1.8rem;font-weight:700; } .summary-card .detail { font-size:0.75rem;color:var(--text-muted);margin-top:0.25rem; }
-    .value-green { color:var(--green); } .value-red { color:var(--red); } .value-orange { color:var(--orange); } .value-blue { color:var(--blue); }
-    .table-card { background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:1.5rem;margin-bottom:1.5rem; }
-    .table-card h2 { font-size:0.95rem;font-weight:600;margin-bottom:0.5rem; }
-    .table-desc { font-size:0.78rem;color:var(--text-muted);margin-bottom:1rem;line-height:1.5; }
-    table { width:100%;border-collapse:collapse; }
-    th { text-align:left;font-size:0.68rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);padding:0.5rem 0.4rem;border-bottom:1px solid var(--border);white-space:nowrap; }
-    th.sortable { cursor:pointer;user-select:none; } th.sortable:hover { color:var(--text); }
-    th.sortable::after { content:' \21C5';display:inline-block;margin-left:0.15rem;opacity:0.3;font-size:0.6rem; }
-    th.sort-asc::after { content:' \25B2';opacity:1; } th.sort-desc::after { content:' \25BC';opacity:1; }
-    td { padding:0.4rem 0.4rem;font-size:0.78rem;border-bottom:1px solid var(--border);vertical-align:top; }
-    tr:last-child td { border-bottom:none; } tr:hover td { background:rgba(255,255,255,0.02); }
-    .model-name { font-weight:600;font-size:0.8rem; }
+    .summary { display:flex;gap:1.25rem;margin:1.5rem 0 2rem;flex-wrap:wrap; }
+    .card { background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:0.85rem 1.25rem;min-width:120px; }
+    .card .label { font-size:0.65rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.05em; }
+    .card .value { font-size:1.4rem;font-weight:700;margin-top:0.2rem; }
+    .card .detail { font-size:0.7rem;color:var(--text-muted);margin-top:0.1rem; }
+    .controls { display:flex;gap:1rem;margin-bottom:1rem;align-items:center;flex-wrap:wrap; }
+    .table-wrap { overflow-x:auto;position:relative; }
+    table { width:100%;border-collapse:separate;border-spacing:0;background:var(--surface);border-radius:8px;border:1px solid var(--border); }
+    th,td { border-bottom:1px solid var(--border); }
+    th { background:#14161e;padding:0.65rem 0.75rem;text-align:left;font-size:0.65rem;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted);cursor:pointer;user-select:none;white-space:nowrap;position:sticky;top:0;z-index:2; }
+    th:hover { color:var(--text); }
+    th.sorted-asc::after { content:" \25B2";font-size:0.55rem; }
+    th.sorted-desc::after { content:" \25BC";font-size:0.55rem; }
+    td { padding:0.5rem 0.75rem;font-size:0.8rem;white-space:nowrap;max-width:200px;overflow:hidden;text-overflow:ellipsis; }
+    tr:hover td { background:rgba(52,211,153,0.04); }
+    th:first-child,td:first-child { position:sticky;left:0;z-index:1;background:var(--surface);border-right:2px solid var(--border);max-width:none; }
+    th:first-child { z-index:3;background:#14161e; }
+    tr:hover td:first-child { background:#1e2130; }
+    .num { font-variant-numeric:tabular-nums;text-align:right; }
+    .muted { color:var(--text-muted); }
+    .model-name { font-weight:500; }
+    .schema-label { color:var(--text-muted);font-size:0.65rem; }
+    .yes-green { color:var(--green);font-weight:600; }
+    .no-muted { color:var(--text-muted); }
     .badge { display:inline-block;padding:0.1rem 0.35rem;border-radius:3px;font-size:0.65rem;font-weight:600; }
     .badge-pass { background:rgba(52,211,153,0.15);color:var(--green); }
-    .badge-fail { background:rgba(248,113,113,0.15);color:var(--red); }
     .badge-warn { background:rgba(251,191,36,0.15);color:var(--orange); }
     .badge-hi { background:rgba(96,165,250,0.15);color:var(--blue); }
     .badge-na { background:rgba(139,143,163,0.08);color:var(--text-muted); }
-    .muted-num { color:var(--text-muted); }
-    .filter-bar { display:flex;flex-wrap:wrap;gap:0.5rem;margin-bottom:0.75rem;align-items:center; }
-    .filter-bar .flabel { font-size:0.7rem;font-weight:600;text-transform:uppercase;letter-spacing:0.05em;color:var(--text-muted); }
-    .fbtn { background:none;border:1px solid var(--border);border-radius:4px;color:var(--text-muted);font-size:0.72rem;padding:0.25rem 0.6rem;cursor:pointer;font-family:inherit;transition:background 0.12s,color 0.12s,border-color 0.12s; }
-    .fbtn:hover { color:var(--text);border-color:var(--text-muted); }
-    .fbtn.active { background:rgba(96,165,250,0.15);border-color:var(--blue);color:var(--blue); }
-    .search-box { background:var(--bg);border:1px solid var(--border);border-radius:6px;padding:0.4rem 0.75rem;color:var(--text);font-size:0.8rem;font-family:inherit;width:220px; }
-    .search-box:focus { border-color:var(--accent);outline:none; }
     .readiness { display:inline-flex;gap:2px; }
-    .readiness-dot { width:8px;height:8px;border-radius:50%;background:var(--border); }
-    .readiness-dot.filled { background:var(--green); }
-    .readiness-dot.partial { background:var(--orange); }
-    .empty-state { text-align:center;padding:3rem 2rem;color:var(--text-muted); }
-    .empty-state h3 { font-size:1.1rem;margin-bottom:0.5rem;color:var(--text); }
-    .warn-tag { display:inline-block;padding:0.05rem 0.3rem;border-radius:3px;font-size:0.6rem;font-weight:500;background:rgba(251,191,36,0.1);color:var(--orange);margin:0 0.1rem; }
+    .rdot { width:8px;height:8px;border-radius:50%;background:var(--border); }
+    .rdot.on { background:var(--green); }
+    .rdot.partial { background:var(--orange); }
     .hi-tag { display:inline-block;padding:0.05rem 0.3rem;border-radius:3px;font-size:0.6rem;font-weight:500;background:rgba(96,165,250,0.1);color:var(--blue);margin:0 0.1rem; }
+    .empty-state { text-align:center;padding:3rem 2rem;color:var(--text-muted);font-size:0.9rem;line-height:1.6; }
+    .toggle-label { display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;cursor:pointer;opacity:0.85; }
+    input[type="number"] { background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.75rem;color:var(--text);font-size:0.85rem;color-scheme:dark; }
+    .resize-handle { position:absolute;right:0;top:0;bottom:0;width:5px;cursor:col-resize;background:transparent; }
+    .resize-handle:hover,.resize-handle.active { background:var(--accent); }
+    th { position:relative; }
   </style>
 </head>
 <body>
@@ -71,197 +73,238 @@
   </nav>
   <header>
     <h1><span>&#9642;</span> Incremental Candidates</h1>
-    <div class="subtitle">Table-materialized models that may benefit from incremental materialization &mdash; {{ creds.name or creds.account_prefix }}</div>
+    <div class="subtitle">Table-materialized models that may benefit from incremental materialization &mdash; {{ summary.table_count }} of {{ summary.total_models }} total models &mdash; {{ creds.name or creds.account_prefix }}</div>
   </header>
 
-  <div class="summary-grid">
-    <div class="summary-card">
-      <div class="label">Total Models</div>
-      <div class="value">{{ summary.total_models }}</div>
-    </div>
-    <div class="summary-card">
-      <div class="label">Table Models</div>
-      <div class="value value-orange">{{ summary.table_count }}</div>
-      <div class="detail">candidates for incremental</div>
-    </div>
-    <div class="summary-card">
-      <div class="label">High Impact</div>
-      <div class="value value-blue">{{ summary.high_impact_count }}</div>
-      <div class="detail">table models flagged high-impact</div>
-    </div>
-    <div class="summary-card">
-      <div class="label">Ready (3+ signals)</div>
-      <div class="value value-green">{{ summary.ready_count }}</div>
-      <div class="detail">have PK + date column</div>
-    </div>
+  <div class="summary">
+    <div class="card"><div class="label">Candidates</div><div class="value">{{ summary.table_count }}</div></div>
+    <div class="card"><div class="label">Total Models</div><div class="value">{{ summary.total_models }}</div></div>
+    <div class="card"><div class="label">High Impact</div><div class="value" style="color:var(--blue);">{{ summary.high_impact_count }}</div></div>
+    <div class="card"><div class="label">Ready (4+/5)</div><div class="value" style="color:var(--green);">{{ summary.ready_count }}</div></div>
+    <div class="card"><div class="label">Top 20% Median</div><div class="value" style="font-size:1.1rem;">{{ fmtTime(summary.median_threshold) }}</div><div class="detail">threshold for readiness check</div></div>
   </div>
 
-  <div class="table-card">
-    <h2>Table Models — Incremental Readiness</h2>
-    <div class="table-desc">
-      Table models sorted by high-impact status and execution time. <strong>Readiness</strong> is based on:
-      date/timestamp column presence, primary key (tested or config), and PK candidate columns.
-      <strong>Warnings</strong> flag complexity that may make incremental conversion harder (window functions, GROUP BY, UNIONs, custom macros).
-    </div>
-
-    {% if summary.candidates %}
-    <div class="filter-bar">
-      <span class="flabel">Filter:</span>
-      <button class="fbtn active" onclick="filterImpact('all',this)">All ({{ summary.table_count }})</button>
-      <button class="fbtn" onclick="filterImpact('hi',this)">High Impact ({{ summary.high_impact_count }})</button>
-      <button class="fbtn" onclick="filterImpact('ready',this)">Ready ({{ summary.ready_count }})</button>
-      <span style="width:1px;height:1rem;background:var(--border);margin:0 0.3rem;"></span>
-      <span class="flabel">Hide:</span>
-      <button class="fbtn" onclick="toggleHide('winfn',this)">Window Fns</button>
-      <button class="fbtn" onclick="toggleHide('groupby',this)">GROUP BY</button>
-      <button class="fbtn" onclick="toggleHide('unions',this)">UNIONs</button>
-      <button class="fbtn" onclick="toggleHide('macros',this)">Macros</button>
-      <span style="flex:1;"></span>
-      <input type="text" class="search-box" id="searchBox" placeholder="Search models..." oninput="applyFilters()">
-      <span class="muted-num" style="font-size:0.72rem;" id="rowCount">{{ summary.table_count }} models</span>
-    </div>
-
-    <div style="overflow-x:auto;">
-    <table id="icTable">
-      <thead>
-        <tr>
-          <th class="sortable" data-col="0" data-type="text">Model</th>
-          <th class="sortable" data-col="1" data-type="text">Layer</th>
-          <th class="sortable" data-col="2" data-type="num">Readiness</th>
-          <th class="sortable" data-col="3" data-type="text">High Impact</th>
-          <th class="sortable" data-col="4" data-type="text">Date Column</th>
-          <th class="sortable" data-col="5" data-type="text">Primary Key</th>
-          <th class="sortable" data-col="6" data-type="num" title="Successful runs in past 30 days">Runs</th>
-          <th class="sortable" data-col="7" data-type="num" title="Average build time">Avg Time</th>
-          <th class="sortable" data-col="8" data-type="num" title="p95 build time">p95 Time</th>
-          <th class="sortable" data-col="9" data-type="num" title="Warehouse queries in past month">Queries</th>
-          <th class="sortable" data-col="10" data-type="num" title="Total downstream models">Downstream</th>
-          <th class="sortable" data-col="11" data-type="text">Warnings</th>
-        </tr>
-      </thead>
-      <tbody>
-        {% for m in summary.candidates %}
-        <tr data-name="{{ m.name|lower }}"
-            data-hi="{{ '1' if m.is_high_impact else '0' }}"
-            data-readiness="{{ m.readiness }}"
-            data-winfn="{{ m.window_fns }}"
-            data-groupby="{{ m.group_bys }}"
-            data-unions="{{ m.unions }}"
-            data-macros="{{ '1' if m.has_custom_macros else '0' }}">
-          <td>
-            <div class="model-name">{{ m.name }}</div>
-            <div style="font-size:0.65rem;color:var(--text-muted);margin-top:0.1rem;">{{ m.folder }}{% if m.subfolder %}/{{ m.subfolder }}{% endif %}</div>
-          </td>
-          <td style="font-size:0.72rem;">{{ m.layer }}</td>
-          <td data-val="{{ m.readiness }}">
-            <div class="readiness" title="Readiness {{ m.readiness }}/5">
-              {% for i in range(5) %}
-              <div class="readiness-dot {% if i < m.readiness %}{% if m.readiness >= 3 %}filled{% else %}partial{% endif %}{% endif %}"></div>
-              {% endfor %}
-            </div>
-          </td>
-          <td>
-            {% if m.is_high_impact %}
-            {% for r in m.hi_reasons %}<span class="hi-tag">{{ r }}</span>{% endfor %}
-            {% else %}<span class="muted-num">--</span>{% endif %}
-          </td>
-          <td>
-            {% if m.has_date_column %}<span class="badge badge-pass">{{ m.date_type or 'Yes' }}</span>{% else %}<span class="badge badge-na">No</span>{% endif %}
-          </td>
-          <td>
-            {% if m.pk_columns_from_tests %}
-            <span class="badge badge-pass" title="{{ m.pk_columns_from_tests | join(', ') }}">{{ m.pk_columns_from_tests | join(', ') }}</span>
-            {% elif m.unique_key %}
-            <span class="badge badge-pass" title="unique_key config">{{ m.unique_key if m.unique_key is string else m.unique_key | join(', ') }}</span>
-            {% elif m.pk_value_cols %}
-            <span class="badge badge-warn" title="Potential PK columns: {{ m.pk_value_cols | join(', ') }}">{{ m.pk_value_cols[0] }}{% if m.pk_value_cols | length > 1 %} +{{ m.pk_value_cols | length - 1 }}{% endif %}</span>
-            {% else %}<span class="badge badge-na">None</span>{% endif %}
-          </td>
-          <td>{{ m.run_count }}</td>
-          <td data-val="{{ m.performance.avg or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.avg) }}{% else %}<span class="muted-num">--</span>{% endif %}</td>
-          <td data-val="{{ m.performance.p95 or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.p95) }}{% else %}<span class="muted-num">--</span>{% endif %}</td>
-          <td>{% if m.query_count > 0 %}{{ m.query_count }}{% else %}<span class="muted-num">0</span>{% endif %}</td>
-          <td data-val="{{ m.downstream_count }}">{{ m.downstream_count }}</td>
-          <td>
-            {% for w in m.warnings %}<span class="warn-tag">{{ w }}</span>{% endfor %}
-            {% if not m.warnings %}<span class="muted-num">--</span>{% endif %}
-          </td>
-        </tr>
-        {% endfor %}
-      </tbody>
-    </table>
-    </div>
-    {% else %}
-    <div class="empty-state">
-      <h3>No table models found</h3>
-      <p>No table-materialized models were found in this environment.</p>
-    </div>
-    {% endif %}
+  <div class="controls">
+    <span style="font-size:0.72rem;color:var(--red);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;">Hide:</span>
+    <label class="toggle-label" style="color:var(--red);">
+      <input type="checkbox" id="filterWinFn" onchange="filterTable()" style="accent-color:var(--red);width:14px;height:14px;cursor:pointer;"> Window Fns
+    </label>
+    <label class="toggle-label" style="color:var(--red);">
+      <input type="checkbox" id="filterGroupBy" onchange="filterTable()" style="accent-color:var(--red);width:14px;height:14px;cursor:pointer;"> GROUP BY
+    </label>
+    <label class="toggle-label" style="color:var(--red);">
+      <input type="checkbox" id="filterMacros" onchange="filterTable()" style="accent-color:var(--red);width:14px;height:14px;cursor:pointer;"> Macros
+    </label>
+    <label class="toggle-label" style="color:var(--red);">
+      <input type="checkbox" id="filterUnions" onchange="filterTable()" style="accent-color:var(--red);width:14px;height:14px;cursor:pointer;"> UNIONs
+    </label>
+    <span style="font-size:0.72rem;color:var(--green);text-transform:uppercase;letter-spacing:0.04em;font-weight:600;margin-left:0.5rem;">Require:</span>
+    <label class="toggle-label" style="color:var(--green);">
+      <input type="checkbox" id="filterPK" onchange="filterTable()" style="accent-color:var(--green);width:14px;height:14px;cursor:pointer;"> Primary Key Test
+    </label>
+    <label class="toggle-label" style="color:var(--green);">
+      <input type="checkbox" id="filterDate" onchange="filterTable()" style="accent-color:var(--green);width:14px;height:14px;cursor:pointer;"> Date / Timeseries
+    </label>
+    <label class="toggle-label" style="color:var(--green);">
+      <input type="checkbox" id="filterHI" onchange="filterTable()" style="accent-color:var(--green);width:14px;height:14px;cursor:pointer;"> High Impact
+    </label>
   </div>
+  <div class="controls" style="margin-top:0;">
+    <span style="font-size:0.72rem;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.04em;">Filters:</span>
+    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--text-muted);">
+      Top N by median <input type="number" id="filterTopN" placeholder="all" min="1" step="1" style="width:80px;" oninput="filterTable()">
+    </label>
+    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--text-muted);">
+      Min Median (min) <input type="number" id="filterMinTime" placeholder="minutes" min="0" step="1" style="width:100px;" oninput="filterTable()">
+    </label>
+    <label style="display:flex;align-items:center;gap:0.4rem;font-size:0.82rem;color:var(--text-muted);">
+      Min Downstream <input type="number" id="filterMinDown" placeholder="0" min="0" step="1" style="width:80px;" oninput="filterTable()">
+    </label>
+    <button onclick="exportCSV()" style="background:var(--surface);border:1px solid var(--border);border-radius:6px;padding:0.5rem 0.85rem;color:var(--text);font-size:0.85rem;cursor:pointer;font-family:inherit;white-space:nowrap;margin-left:auto;" onmouseover="this.style.borderColor='var(--accent)'" onmouseout="this.style.borderColor='var(--border)'">Export CSV</button>
+  </div>
+
+  {% if summary.candidates %}
+  <div class="table-wrap">
+  <table id="optTable">
+    <thead>
+      <tr>
+        <th data-col="0" onclick="sortTable(0,'str')">Model</th>
+        <th data-col="1" onclick="sortTable(1,'str')">Layer</th>
+        <th data-col="2" onclick="sortTable(2,'str')">Root Folder</th>
+        <th data-col="3" onclick="sortTable(3,'str')">Subfolder</th>
+        <th data-col="4" onclick="sortTable(4,'num')">Readiness</th>
+        <th data-col="5" onclick="sortTable(5,'str')">High Impact</th>
+        <th data-col="6" onclick="sortTable(6,'num')">Runs</th>
+        <th data-col="7" onclick="sortTable(7,'num')">Median</th>
+        <th data-col="8" onclick="sortTable(8,'num')">p10</th>
+        <th data-col="9" onclick="sortTable(9,'num')">p90</th>
+        <th data-col="10" onclick="sortTable(10,'num')">Variation</th>
+        <th data-col="11" onclick="sortTable(11,'str')">Primary Key Test</th>
+        <th data-col="12" onclick="sortTable(12,'str')">Potential PK</th>
+        <th data-col="13" onclick="sortTable(13,'str')">Date / Timeseries</th>
+        <th data-col="14" onclick="sortTable(14,'num')">Window Fns</th>
+        <th data-col="15" onclick="sortTable(15,'num')">GROUP BY</th>
+        <th data-col="16" onclick="sortTable(16,'num')">UNIONs</th>
+        <th data-col="17" onclick="sortTable(17,'str')">Macros</th>
+        <th data-col="18" onclick="sortTable(18,'num')">Downstream</th>
+      </tr>
+    </thead>
+    <tbody>
+      {% for m in summary.candidates %}
+      <tr data-name="{{ m.name|lower }}"
+          data-winfn="{{ m.window_fns or 0 }}"
+          data-groupby="{{ m.group_bys or 0 }}"
+          data-unions="{{ m.unions or 0 }}"
+          data-pk="{{ '1' if m.pk_columns_from_tests else '0' }}"
+          data-date="{{ '1' if m.has_date_column else '0' }}"
+          data-macros="{{ '1' if m.has_custom_macros else '0' }}"
+          data-hi="{{ '1' if m.is_high_impact else '0' }}"
+          data-median="{{ m.performance.median or 0 }}"
+          data-downstream="{{ m.downstream_count or 0 }}">
+        <td>
+          <div class="model-name">{{ m.name }}</div>
+          <div class="schema-label">{{ m.folder }}{% if m.subfolder %}/{{ m.subfolder }}{% endif %}</div>
+        </td>
+        <td>{{ m.layer or '' }}</td>
+        <td>{{ m.folder or '' }}</td>
+        <td>{{ m.subfolder or '' }}</td>
+        <td class="num" data-val="{{ m.readiness }}">
+          <div class="readiness" title="{% if m.readiness_details.no_groupby_window %}&#10003;{% else %}&#10007;{% endif %} No GROUP BY/Window | {% if m.readiness_details.top20_median %}&#10003;{% else %}&#10007;{% endif %} Top 20% median | {% if m.readiness_details.pk_or_date %}&#10003;{% else %}&#10007;{% endif %} PK or Date | {% if m.readiness_details.hi_or_downstream %}&#10003;{% else %}&#10007;{% endif %} High impact | {% if m.readiness_details.no_unions_macros %}&#10003;{% else %}&#10007;{% endif %} No UNIONs/Macros">
+            {% for i in range(5) %}
+            <div class="rdot {% if i < m.readiness %}{% if m.readiness >= 4 %}on{% else %}partial{% endif %}{% endif %}"></div>
+            {% endfor %}
+          </div>
+        </td>
+        <td>
+          {% if m.is_high_impact %}{% for r in m.hi_reasons %}<span class="hi-tag">{{ r }}</span>{% endfor %}{% else %}<span class="no-muted">--</span>{% endif %}
+        </td>
+        <td class="num" data-val="{{ m.run_count }}">{{ m.run_count }}</td>
+        <td class="num" data-val="{{ m.performance.median or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.median) }}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.performance.p10 or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.p10) }}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.performance.p90 or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.p90) }}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.performance.variation or 0 }}">{% if m.performance %}{{ fmtTime(m.performance.variation) }}{% else %}<span class="muted">--</span>{% endif %}</td>
+        <td>{% if m.pk_columns_from_tests %}<span style="color:var(--green);font-weight:500;" title="{{ m.pk_columns_from_tests | join(', ') }}">{{ m.pk_columns_from_tests | join(', ') }}</span>{% else %}<span class="no-muted">--</span>{% endif %}</td>
+        <td>{% if m.pk_value_cols %}<span style="color:var(--blue);font-weight:500;" title="{{ m.pk_value_cols | join(', ') }}">{{ m.pk_value_cols | join(', ') }}</span>{% elif m.unique_key %}<span style="color:var(--blue);font-weight:500;">{{ m.unique_key if m.unique_key is string else m.unique_key | join(', ') }}</span>{% else %}<span class="no-muted">--</span>{% endif %}</td>
+        <td>{% if m.has_date_column %}<span class="yes-green">{{ m.date_type or 'Yes' }}</span>{% else %}<span class="no-muted">No</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.window_fns or 0 }}">{% if m.has_window_function %}<span style="color:var(--orange);">{{ m.window_fns or 1 }}</span>{% else %}0{% endif %}</td>
+        <td class="num" data-val="{{ m.group_bys or 0 }}">{{ m.group_bys or '0' }}</td>
+        <td class="num" data-val="{{ m.unions or 0 }}">{{ m.unions or '0' }}</td>
+        <td>{% if m.has_custom_macros %}<span class="yes-green" title="{{ m.custom_macros | join(', ') }}">Yes ({{ m.custom_macros | length }})</span>{% else %}<span class="no-muted">No</span>{% endif %}</td>
+        <td class="num" data-val="{{ m.downstream_count or 0 }}">{{ m.downstream_count or 0 }}</td>
+      </tr>
+      {% endfor %}
+    </tbody>
+  </table>
+  </div>
+  {% else %}
+  <div class="empty-state">No table models found in this environment.</div>
+  {% endif %}
 
 <script>
-var activeImpact = 'all';
-var hideFlags = { winfn: false, groupby: false, unions: false, macros: false };
+function filterTable() {
+  var fWinFn = document.getElementById('filterWinFn').checked;
+  var fGroupBy = document.getElementById('filterGroupBy').checked;
+  var fMacros = document.getElementById('filterMacros').checked;
+  var fUnions = document.getElementById('filterUnions').checked;
+  var fPK = document.getElementById('filterPK').checked;
+  var fDate = document.getElementById('filterDate').checked;
+  var fHI = document.getElementById('filterHI').checked;
+  var minTimeSecs = (parseFloat(document.getElementById('filterMinTime').value) || 0) * 60;
+  var minDown = parseInt(document.getElementById('filterMinDown').value) || 0;
+  var topN = parseInt(document.getElementById('filterTopN').value) || 0;
 
-function filterImpact(type, btn) {
-  activeImpact = type;
-  document.querySelectorAll('.filter-bar .fbtn').forEach(function(b) {
-    if (b.getAttribute('onclick') && b.getAttribute('onclick').indexOf('filterImpact') === 0) b.classList.remove('active');
-  });
-  btn.classList.add('active');
-  applyFilters();
-}
+  var rows = Array.from(document.querySelectorAll('#optTable tbody tr'));
+  var ranked = rows.map(function(r) { return { row: r, median: parseFloat(r.dataset.median) || 0 }; })
+    .sort(function(a, b) { return b.median - a.median; });
+  var topNSet = new Set();
+  if (topN > 0) ranked.slice(0, topN).forEach(function(r) { topNSet.add(r.row); });
 
-function toggleHide(flag, btn) {
-  hideFlags[flag] = !hideFlags[flag];
-  btn.classList.toggle('active', hideFlags[flag]);
-  applyFilters();
-}
-
-function applyFilters() {
-  var search = (document.getElementById('searchBox').value || '').toLowerCase();
-  var visible = 0;
-  document.querySelectorAll('#icTable tbody tr').forEach(function(row) {
-    var matchImpact = activeImpact === 'all'
-      || (activeImpact === 'hi' && row.dataset.hi === '1')
-      || (activeImpact === 'ready' && parseInt(row.dataset.readiness) >= 3);
-    var matchSearch = !search || row.dataset.name.indexOf(search) !== -1;
-    var hidden = false;
-    if (hideFlags.winfn && parseInt(row.dataset.winfn) > 0) hidden = true;
-    if (hideFlags.groupby && parseInt(row.dataset.groupby) > 0) hidden = true;
-    if (hideFlags.unions && parseInt(row.dataset.unions) > 0) hidden = true;
-    if (hideFlags.macros && row.dataset.macros === '1') hidden = true;
-    var show = matchImpact && matchSearch && !hidden;
+  rows.forEach(function(row) {
+    var show = true;
+    if (topN > 0 && !topNSet.has(row)) show = false;
+    if (show && fWinFn && parseInt(row.dataset.winfn) > 0) show = false;
+    if (show && fGroupBy && parseInt(row.dataset.groupby) > 0) show = false;
+    if (show && fMacros && row.dataset.macros === '1') show = false;
+    if (show && fUnions && parseInt(row.dataset.unions) > 0) show = false;
+    if (show && fPK && row.dataset.pk !== '1') show = false;
+    if (show && fDate && row.dataset.date !== '1') show = false;
+    if (show && fHI && row.dataset.hi !== '1') show = false;
+    if (show && minTimeSecs > 0 && parseFloat(row.dataset.median) < minTimeSecs) show = false;
+    if (show && minDown > 0 && parseInt(row.dataset.downstream) < minDown) show = false;
     row.style.display = show ? '' : 'none';
-    if (show) visible++;
   });
-  document.getElementById('rowCount').textContent = visible + ' models';
 }
 
-document.querySelectorAll('th.sortable').forEach(function(th) {
-  th.addEventListener('click', function() {
-    var table = document.getElementById('icTable');
-    if (!table) return;
-    var tbody = table.querySelector('tbody');
-    var rows = Array.from(tbody.querySelectorAll('tr'));
-    var col = parseInt(th.dataset.col);
-    var type = th.dataset.type;
-    var asc = !th.classList.contains('sort-asc');
-    table.querySelectorAll('th.sortable').forEach(function(h) { h.classList.remove('sort-asc','sort-desc'); });
-    th.classList.add(asc ? 'sort-asc' : 'sort-desc');
-    rows.sort(function(a, b) {
-      var av, bv;
-      if (type === 'num') {
-        av = parseFloat(a.children[col].dataset.val || a.children[col].textContent.replace(/[^0-9.\-]/g, '')) || 0;
-        bv = parseFloat(b.children[col].dataset.val || b.children[col].textContent.replace(/[^0-9.\-]/g, '')) || 0;
-      } else { av = a.children[col].textContent.trim().toLowerCase(); bv = b.children[col].textContent.trim().toLowerCase(); }
-      if (av < bv) return asc ? -1 : 1;
-      if (av > bv) return asc ? 1 : -1;
-      return 0;
-    });
-    rows.forEach(function(r) { tbody.appendChild(r); });
+var currentSort = { col: -1, asc: true };
+var _resizing = false;
+function sortTable(col, type) {
+  if (_resizing) return;
+  if (currentSort.col === col) currentSort.asc = !currentSort.asc;
+  else { currentSort.col = col; currentSort.asc = type === 'str'; }
+  document.querySelectorAll('#optTable th').forEach(function(th) { th.classList.remove('sorted-asc','sorted-desc'); });
+  var th = document.querySelector('#optTable th[data-col="' + col + '"]');
+  if (th) th.classList.add(currentSort.asc ? 'sorted-asc' : 'sorted-desc');
+  var tbody = document.querySelector('#optTable tbody');
+  var rows = Array.from(tbody.rows);
+  rows.sort(function(a, b) {
+    if (type === 'num') {
+      var av = parseFloat(a.cells[col].dataset.val || a.cells[col].textContent.replace(/[^0-9.\-]/g,'')) || 0;
+      var bv = parseFloat(b.cells[col].dataset.val || b.cells[col].textContent.replace(/[^0-9.\-]/g,'')) || 0;
+      return currentSort.asc ? av - bv : bv - av;
+    } else {
+      var av = a.cells[col].textContent.trim().toLowerCase();
+      var bv = b.cells[col].textContent.trim().toLowerCase();
+      return currentSort.asc ? av.localeCompare(bv) : bv.localeCompare(av);
+    }
   });
-});
+  rows.forEach(function(r) { tbody.appendChild(r); });
+}
+
+function initResize(table) {
+  table.querySelectorAll('thead th').forEach(function(th) {
+    th.style.position = 'relative';
+    var handle = document.createElement('div');
+    handle.className = 'resize-handle';
+    handle.addEventListener('mousedown', function(e) {
+      e.preventDefault(); e.stopPropagation();
+      _resizing = true; handle.classList.add('active');
+      var startX = e.pageX, startW = th.offsetWidth;
+      function onMove(ev) { th.style.width = Math.max(40, startW + ev.pageX - startX) + 'px'; th.style.minWidth = th.style.width; }
+      function onUp() { handle.classList.remove('active'); document.removeEventListener('mousemove', onMove); document.removeEventListener('mouseup', onUp); setTimeout(function() { _resizing = false; }, 50); }
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    });
+    th.appendChild(handle);
+  });
+}
+document.querySelectorAll('table').forEach(function(t) { initResize(t); });
+
+function exportCSV() {
+  var table = document.getElementById('optTable');
+  if (!table) return;
+  var headers = [], colVisible = [];
+  table.querySelectorAll('thead th').forEach(function(th, i) {
+    var visible = th.style.display !== 'none';
+    colVisible.push(visible);
+    if (visible) headers.push('"' + th.textContent.trim().replace(/"/g, '""') + '"');
+  });
+  var rows = [headers.join(',')];
+  table.querySelectorAll('tbody tr').forEach(function(row) {
+    if (row.style.display === 'none') return;
+    var cells = [];
+    Array.from(row.cells).forEach(function(td, i) {
+      if (!colVisible[i]) return;
+      var val = td.dataset.val !== undefined ? td.dataset.val : td.textContent.trim().replace(/\s+/g, ' ');
+      cells.push('"' + String(val).replace(/"/g, '""') + '"');
+    });
+    rows.push(cells.join(','));
+  });
+  var blob = new Blob([rows.join('\n')], { type: 'text/csv' });
+  var a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = 'incremental_candidates.csv';
+  a.click();
+}
 </script>
 </body>
 </html>

@@ -626,7 +626,6 @@ def _fetch_high_impact_signals(client: DbtClient):
             if is_public:
                 public_model_uids.add(uid)
             if is_contract:
-                signals[uid].add("Contract Enforced")
                 contract_model_uids.add(uid)
             tags = node.get("tags") or []
             if tags:
@@ -673,6 +672,41 @@ def _strip_optional_hi_signals(hi_signals, creds):
             hi_signals[uid] = reasons
         else:
             del hi_signals[uid]
+
+
+def apply_hi_signals_from_config(hi_signals, hi_data, creds):
+    """Apply public model, tag, usage, and optional signal config to hi_signals dict.
+
+    Shared across all tabs so public model display is consistent:
+    - public + contract -> "Public Model + Contract"
+    - public only -> "Public Model"
+    """
+    public_uids = set(hi_data.get("public_model_uids", []) if isinstance(hi_data, dict) else [])
+    contract_uids = set(hi_data.get("contract_model_uids", []) if isinstance(hi_data, dict) else [])
+    model_tags_map = hi_data.get("model_tags", {}) if isinstance(hi_data, dict) else {}
+
+    public_mode = creds.get("public_model_mode", "public_with_contract")
+    if public_mode == "public_only":
+        for uid in public_uids:
+            if uid in contract_uids:
+                hi_signals.setdefault(uid, set()).add("Public Model + Contract")
+            else:
+                hi_signals.setdefault(uid, set()).add("Public Model")
+    elif public_mode == "public_with_contract":
+        for uid in public_uids & contract_uids:
+            hi_signals.setdefault(uid, set()).add("Public Model + Contract")
+        for uid in public_uids - contract_uids:
+            # public_with_contract mode only includes public models that also have contract
+            pass
+
+    # Tags
+    hi_tag_set = set(creds.get("high_impact_tags") or [])
+    if hi_tag_set:
+        for uid, tags in model_tags_map.items():
+            if hi_tag_set & set(tags):
+                hi_signals.setdefault(uid, set()).add("High Impact Tag")
+
+    _strip_optional_hi_signals(hi_signals, creds)
 
 
 # ---------------------------------------------------------------------------
@@ -746,24 +780,7 @@ def fetch_data_quality_summary(client: DbtClient, days=30):
 
     # Apply user config: tags, public model mode
     creds = load_credentials() or {}
-    hi_tag_set = set(creds.get("high_impact_tags") or [])
-    public_mode = creds.get("public_model_mode", "public_with_contract")
-
-    # Apply public model signal based on user config
-    if public_mode == "public_only":
-        for uid in public_model_uids:
-            hi_signals.setdefault(uid, set()).add("Public Model")
-    else:
-        for uid in public_model_uids & contract_model_uids:
-            hi_signals.setdefault(uid, set()).add("Public Model")
-
-    # Apply high-impact tags
-    if hi_tag_set:
-        for uid, tags in model_tags_map.items():
-            if hi_tag_set & set(tags):
-                hi_signals.setdefault(uid, set()).add("High Impact Tag")
-
-    _strip_optional_hi_signals(hi_signals, creds)
+    apply_hi_signals_from_config(hi_signals, hi_data, creds)
 
     # Fetch details for failed runs (parallel)
     failed_run_details = {}

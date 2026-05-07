@@ -28,17 +28,17 @@ def _cache_key(prefix, *args):
 
 
 def is_incremental_candidates_cached(client):
-    key = _cache_key("ic_summary_v1", client.account_id, client.environment_id)
+    key = _cache_key("ic_summary_v2", client.account_id, client.environment_id)
     return db_get(f"api:{key}", ttl=_API_TTL) is not None
 
 
 def invalidate_incremental_candidates_cache(client):
-    key = _cache_key("ic_summary_v1", client.account_id, client.environment_id)
+    key = _cache_key("ic_summary_v2", client.account_id, client.environment_id)
     db_delete(f"api:{key}")
 
 
 # ---------------------------------------------------------------------------
-# Code complexity analysis (from SAO model_details.py)
+# Code complexity analysis
 # ---------------------------------------------------------------------------
 
 def _compute_complexity(raw_code):
@@ -69,11 +69,10 @@ def _compute_complexity(raw_code):
 
 
 # ---------------------------------------------------------------------------
-# Fetch detailed model metadata (code, catalog, config) for table models
+# Fetch detailed model metadata for table models
 # ---------------------------------------------------------------------------
 
 def _fetch_model_details(client: DbtClient):
-    """Fetch full model metadata including rawCode, catalog columns, and config."""
     cache_key = str(client.environment_id)
     with _CACHE_LOCK:
         entry = _DETAIL_CACHE.get(cache_key)
@@ -130,7 +129,6 @@ def _fetch_model_details(client: DbtClient):
             break
         cursor = models_data["pageInfo"]["endCursor"]
 
-    # Process only table models (incremental candidates)
     details = {}
     for node in all_models:
         mat = node.get("materializedType") or "unknown"
@@ -168,10 +166,9 @@ def _fetch_model_details(client: DbtClient):
                     break
             date_type = "Timeseries" if is_timeseries else "Date"
 
-        # Primary key detection from unique_key config
         unique_key = config.get("unique_key")
 
-        # PK detection from unique + not_null tests on same column
+        # PK from unique + not_null tests on same column
         children = node.get("children") or []
         test_uids = [c["uniqueId"] for c in children if c.get("resourceType") == "test"]
         model_name = node["name"]
@@ -189,9 +186,7 @@ def _fetch_model_details(client: DbtClient):
                     not_null_test_cols[col] = t_uid
         pk_columns_from_tests = sorted(set(unique_test_cols.keys()) & set(not_null_test_cols.keys()))
 
-        # PK value columns: names containing id/key/sk/pk
         pk_value_cols = [cn for cn in column_names if re.search(r'(^|_)(id|key|sk|pk)(_|$)', cn)]
-
         has_potential_pk = bool(unique_key) or bool(pk_columns_from_tests) or bool(pk_value_cols)
 
         details[uid] = {
@@ -222,18 +217,7 @@ def _fetch_model_details(client: DbtClient):
 # ---------------------------------------------------------------------------
 
 def fetch_incremental_candidates(client: DbtClient):
-    """Identify table models that are good candidates for incremental materialization.
-
-    A model is a stronger candidate when it has:
-    - A date/timestamp column (for incremental strategy)
-    - A primary key (unique_key for merge)
-    - High execution time
-    - High downstream impact
-    - High-impact classification
-
-    Returns summary dict with candidates list and metadata.
-    """
-    summary_key = _cache_key("ic_summary_v1", client.account_id, client.environment_id)
+    summary_key = _cache_key("ic_summary_v2", client.account_id, client.environment_id)
     cached = db_get(f"api:{summary_key}", ttl=_API_TTL)
     if cached is not None:
         print(f"[{client.name}] Serving incremental candidates from cache")
@@ -241,70 +225,30 @@ def fetch_incremental_candidates(client: DbtClient):
 
     t0 = time.time()
 
-    # Reuse existing fetchers
     from project_health import (
         _fetch_all_models, _fetch_model_run_times,
         _infer_layer, _parse_path, _percentile,
     )
     from data_quality import (
         _fetch_high_impact_signals, _fetch_dependency_counts,
-        _fetch_model_usage_query_counts,
+        _fetch_model_usage_query_counts, apply_hi_signals_from_config,
     )
 
     models = _fetch_all_models(client)
     model_map = {m["uniqueId"]: m for m in models}
 
-    # Get detailed analysis for table models
     details = _fetch_model_details(client)
-
-    # Run times
     table_uids = list(details.keys())
     run_times = _fetch_model_run_times(client, table_uids)
-
-    # Dependencies
-    downstream_counts, upstream_counts, _ = _fetch_dependency_counts(client)
-
-    # Query counts
+    downstream_counts, upstream_counts, children_of = _fetch_dependency_counts(client)
     query_counts = _fetch_model_usage_query_counts(client)
 
-    # High-impact signals
+    # High-impact signals (shared logic)
     creds = load_credentials() or {}
     hi_data = _fetch_high_impact_signals(client)
     raw_signals = hi_data.get("signals", {}) if isinstance(hi_data, dict) and "signals" in hi_data else {}
     hi_signals = {uid: set(reasons) for uid, reasons in raw_signals.items()}
-
-    # Apply user config for high-impact filtering
-    selected_tags = creds.get("high_impact_tags", [])
-    model_tags_map = hi_data.get("model_tags", {}) if isinstance(hi_data, dict) else {}
-    public_uids = set(hi_data.get("public_model_uids", []) if isinstance(hi_data, dict) else [])
-    contract_uids = set(hi_data.get("contract_model_uids", []) if isinstance(hi_data, dict) else [])
-
-    # Add tag-based signals
-    if selected_tags:
-        for uid, tags in model_tags_map.items():
-            if any(t in selected_tags for t in tags):
-                hi_signals.setdefault(uid, set()).add("Tagged")
-
-    # Add public model signals based on user config
-    public_mode = creds.get("public_model_mode", "public_with_contract")
-    if public_mode in ("public_only", "public_with_contract"):
-        for uid in public_uids:
-            hi_signals.setdefault(uid, set()).add("Public Model")
-    if public_mode == "public_with_contract":
-        for uid in contract_uids:
-            hi_signals.setdefault(uid, set()).add("Contract Enforced")
-
-    # Strip disabled signals
-    if not creds.get("high_impact_include_semantic_models", True):
-        for uid in list(hi_signals.keys()):
-            hi_signals[uid].discard("Semantic Model")
-            if not hi_signals[uid]:
-                del hi_signals[uid]
-    if not creds.get("high_impact_include_exposure_dependents", True):
-        for uid in list(hi_signals.keys()):
-            hi_signals[uid].discard("Dependent Exposure")
-            if not hi_signals[uid]:
-                del hi_signals[uid]
+    apply_hi_signals_from_config(hi_signals, hi_data, creds)
 
     # Usage-based high impact (top N% by query count)
     heavy_pct = creds.get("heavy_usage_pct", 20)
@@ -317,7 +261,37 @@ def fetch_incremental_candidates(client: DbtClient):
                 if qc >= threshold:
                     hi_signals.setdefault(uid, set()).add("Heavy Usage")
 
+    # Compute downstream high-impact dependency counts per model
+    def _count_downstream_hi(uid):
+        """Count how many downstream models are high-impact."""
+        visited = set()
+        queue = list(children_of.get(uid, []))
+        count = 0
+        while queue:
+            child = queue.pop(0)
+            if child in visited or child == uid:
+                continue
+            visited.add(child)
+            if child in hi_signals:
+                count += 1
+            queue.extend(children_of.get(child, []))
+        return count
+
+    # First pass: compute medians to determine top 20% threshold
     print(f"[{client.name}] Building incremental candidates...")
+    medians = {}
+    for uid in table_uids:
+        times = sorted(run_times.get(uid, []))
+        if times:
+            medians[uid] = _percentile(times, 50)
+
+    sorted_medians = sorted(medians.values(), reverse=True)
+    if sorted_medians:
+        top20_idx = max(0, int(len(sorted_medians) * 0.2) - 1)
+        median_threshold = sorted_medians[top20_idx]
+    else:
+        median_threshold = float('inf')
+
     candidates = []
     for uid, detail in details.items():
         m = model_map.get(uid)
@@ -331,51 +305,52 @@ def fetch_incremental_candidates(client: DbtClient):
         perf = {}
         if times:
             perf = {
-                "min": round(min(times), 1),
-                "p50": round(_percentile(times, 50), 1),
-                "p95": round(_percentile(times, 95), 1),
-                "max": round(max(times), 1),
-                "avg": round(sum(times) / len(times), 1),
+                "p10": round(_percentile(times, 10), 1),
+                "median": round(_percentile(times, 50), 1),
+                "p90": round(_percentile(times, 90), 1),
+                "variation": round(_percentile(times, 90) - _percentile(times, 10), 1),
             }
-
-        # Readiness score (0-5): how ready is this model for incremental?
-        readiness = 0
-        if detail["has_date_column"]:
-            readiness += 1
-            if detail["date_type"] == "Timeseries":
-                readiness += 1  # timeseries is better than plain date
-        if detail["pk_columns_from_tests"]:
-            readiness += 2  # tested PK is best
-        elif detail.get("unique_key"):
-            readiness += 2  # config unique_key
-        elif detail["pk_value_cols"]:
-            readiness += 1  # potential PK column names
-
-        # Complexity warnings
-        warnings = []
-        if detail.get("window_fns", 0) > 0:
-            warnings.append("Window functions")
-        if detail.get("group_bys", 0) > 0:
-            warnings.append("GROUP BY")
-        if detail.get("unions", 0) > 0:
-            warnings.append("UNIONs")
-        if detail.get("has_custom_macros"):
-            warnings.append("Custom macros")
 
         is_high_impact = uid in hi_signals
         hi_reasons = sorted(hi_signals.get(uid, set()))
+        downstream_hi_count = _count_downstream_hi(uid)
+
+        # Readiness: 5 binary checks
+        check_no_groupby_window = (detail.get("group_bys", 0) == 0 and detail.get("window_fns", 0) == 0)
+        check_top20_median = (perf.get("median", 0) >= median_threshold) if median_threshold < float('inf') else False
+        check_pk_or_date = (detail["has_potential_pk"] or detail["has_date_column"])
+        check_hi_or_downstream = (is_high_impact or downstream_hi_count >= 5)
+        check_no_unions_macros = (detail.get("unions", 0) == 0 and not detail.get("has_custom_macros", False))
+
+        readiness = sum([
+            check_no_groupby_window,
+            check_top20_median,
+            check_pk_or_date,
+            check_hi_or_downstream,
+            check_no_unions_macros,
+        ])
+
+        readiness_details = {
+            "no_groupby_window": check_no_groupby_window,
+            "top20_median": check_top20_median,
+            "pk_or_date": check_pk_or_date,
+            "hi_or_downstream": check_hi_or_downstream,
+            "no_unions_macros": check_no_unions_macros,
+        }
 
         candidates.append({
             "unique_id": uid,
             "name": detail["name"],
             "folder": folder,
             "subfolder": subfolder,
+            "subsubfolder": subsubfolder,
             "layer": layer,
             "file_path": detail["file_path"],
             "run_count": len(times),
             "performance": perf,
             "downstream_count": downstream_counts.get(uid, 0),
             "upstream_count": upstream_counts.get(uid, 0),
+            "downstream_hi_count": downstream_hi_count,
             "query_count": query_counts.get(uid, 0),
             "has_date_column": detail["has_date_column"],
             "date_type": detail["date_type"],
@@ -392,22 +367,21 @@ def fetch_incremental_candidates(client: DbtClient):
             "lines": detail.get("lines", 0),
             "column_count": detail.get("column_count", 0),
             "readiness": readiness,
-            "warnings": warnings,
+            "readiness_details": readiness_details,
             "is_high_impact": is_high_impact,
             "hi_reasons": hi_reasons,
         })
 
-    # Sort by: high-impact first, then by avg execution time descending
     candidates.sort(key=lambda c: (
-        0 if c["is_high_impact"] else 1,
-        -(c["performance"].get("avg", 0)),
+        -c["readiness"],
+        -(c["performance"].get("median", 0)),
     ))
 
     hi_count = sum(1 for c in candidates if c["is_high_impact"])
-    ready_count = sum(1 for c in candidates if c["readiness"] >= 3)
+    ready_count = sum(1 for c in candidates if c["readiness"] >= 4)
     elapsed = time.time() - t0
     print(f"[{client.name}] Incremental candidates built in {elapsed:.1f}s — "
-          f"{len(candidates)} table models, {hi_count} high-impact, {ready_count} ready")
+          f"{len(candidates)} table models, {hi_count} high-impact, {ready_count} ready (4+/5)")
 
     result = {
         "candidates": candidates,
@@ -415,6 +389,7 @@ def fetch_incremental_candidates(client: DbtClient):
         "table_count": len(candidates),
         "high_impact_count": hi_count,
         "ready_count": ready_count,
+        "median_threshold": round(median_threshold, 1) if median_threshold < float('inf') else 0,
     }
     db_set(f"api:{summary_key}", result)
     return result
