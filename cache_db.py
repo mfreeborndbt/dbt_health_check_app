@@ -15,7 +15,7 @@ import time
 # Bump this version whenever the app's data schema changes.
 # On startup, if the stored version differs, all cached data is cleared
 # so users get a clean re-fetch instead of serving stale/incompatible data.
-CACHE_SCHEMA_VERSION = "3"
+CACHE_SCHEMA_VERSION = "5"
 
 DB_PATH = os.path.join(os.path.dirname(__file__), ".cache", "health_check_cache.duckdb")
 _lock = threading.Lock()

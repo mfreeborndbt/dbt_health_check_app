@@ -187,7 +187,8 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
 
     Fetches up to 200 recent runs, then filters to only those within the last 30 days.
     """
-    key = _cache_key("ph_runtimes_v3", client.account_id, client.environment_id)
+    uids_hash = hashlib.md5("|".join(sorted(model_uids)).encode()).hexdigest()[:8]
+    key = _cache_key("ph_runtimes_v4", client.account_id, client.environment_id, uids_hash)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         return cached
@@ -255,109 +256,147 @@ def _fetch_model_run_times(client: DbtClient, model_uids):
     return run_times
 
 
-def _fetch_model_run_stats(client: DbtClient, model_uids):
-    """Fetch execution times AND row counts from modelHistoricalRuns with stats.
+def _fetch_single_run_models_with_stats(client, job_id, run_id):
+    """Fetch model details + stats for a single run. Cached per run (immutable)."""
+    key = _cache_key("run_model_stats_v1", client.environment_id, job_id, run_id)
+    cached = db_get(f"api:{key}")
+    if cached is not None:
+        return run_id, cached
 
-    Uses parallel workers to speed up batch fetching.
+    query = """
+    query ($jobId: BigInt!, $runId: BigInt) {
+      job(id: $jobId, runId: $runId) {
+        models {
+          uniqueId
+          executionTime
+          status
+          stats { id value }
+        }
+      }
+    }
+    """
+    try:
+        data = client.query_discovery(query, variables={"jobId": job_id, "runId": run_id})
+        models = data.get("job", {}).get("models") or []
+        db_set(f"api:{key}", models)
+        return run_id, models
+    except Exception as e:
+        print(f"  Skipping run {run_id}: {e}")
+        return run_id, None
+
+
+def _fetch_model_run_stats(client: DbtClient, model_uids):
+    """Fetch execution times AND row counts by aggregating across Admin API runs.
+
+    Uses the Admin API to get runs, then the Discovery API job(id, runId)
+    query to get per-model stats for each run. This avoids the ~20 run cap
+    of modelHistoricalRuns.
+
     Returns dict: uid -> {
         "times": [float], "earliest_rows": int|None, "latest_rows": int|None,
         "row_delta": int|None, "avg_new_rows": float|None,
     }
     """
-    key = _cache_key("ph_runstats_v3", client.account_id, client.environment_id)
+    uids_hash = hashlib.md5("|".join(sorted(model_uids)).encode()).hexdigest()[:8]
+    key = _cache_key("ph_runstats_v5", client.account_id, client.environment_id, uids_hash)
     cached = db_get(f"api:{key}", ttl=_API_TTL)
     if cached is not None:
         return cached
 
-    from datetime import datetime, timedelta, timezone
-    cutoff = datetime.now(timezone.utc) - timedelta(days=30)
+    from data_quality import _fetch_runs, _get_scheduled_jobs
 
-    print(f"[{client.name}] Fetching model run stats (times + rows) for {len(model_uids)} models...")
-    uids = list(model_uids)
-    batch_size = 10
-    batches = [uids[i:i + batch_size] for i in range(0, len(uids), batch_size)]
-    results = {}
+    print(f"[{client.name}] Fetching model run stats from job runs...")
+    runs = _fetch_runs(client, days=30)
+    scheduled_jobs = _get_scheduled_jobs(client)
+    uid_set = set(model_uids)
 
-    def _fetch_batch(batch):
-        aliases = []
-        for j, uid in enumerate(batch):
-            safe_uid = uid.replace('"', '\\"')
-            aliases.append(
-                f'm{j}: modelHistoricalRuns(uniqueId: "{safe_uid}", lastRunCount: 100) '
-                f'{{ uniqueId executionTime status executeCompletedAt stats {{ id value }} }}'
-            )
-        gql = (
-            "query ($environmentId: BigInt!) {\n"
-            "  environment(id: $environmentId) {\n"
-            "    applied {\n"
-            "      " + "\n      ".join(aliases) + "\n"
-            "    }\n"
-            "  }\n"
-            "}"
-        )
-        data = client.query_discovery(gql, variables={"environmentId": client.environment_id})
-        applied = data["environment"]["applied"]
-        batch_results = {}
-        for j, uid in enumerate(batch):
-            runs = applied.get(f"m{j}") or []
-            times = []
-            row_counts = []
-            for r in runs:
-                if r.get("status") != "success":
-                    continue
-                completed = r.get("executeCompletedAt") or ""
-                in_window = True
-                if completed:
-                    try:
-                        dt = datetime.fromisoformat(completed.replace("Z", "+00:00"))
-                        if dt < cutoff:
-                            in_window = False
-                    except (ValueError, TypeError):
-                        pass
+    # Filter to scheduled runs in the target environment
+    env_runs = [
+        r for r in runs
+        if str(r.get("environment_id")) == str(client.environment_id)
+        and r["job_definition_id"] in scheduled_jobs
+        and r["status"] in (10, 20)  # success or error at job level
+    ]
+    print(f"[{client.name}] Found {len(env_runs)} scheduled runs in environment, fetching model details...")
 
-                if in_window and r.get("executionTime") and r["executionTime"] > 0:
-                    times.append(r["executionTime"])
+    # Parallel fetch per-run model data
+    run_models = {}
+    uncached = []
+    for r in env_runs:
+        rid, jid = r["id"], r["job_definition_id"]
+        k = _cache_key("run_model_stats_v1", client.environment_id, jid, rid)
+        c = db_get(f"api:{k}")
+        if c is not None:
+            run_models[rid] = c
+        else:
+            uncached.append(r)
 
-                # Row counts from stats — check all known stat keys
-                stat_map = {s["id"]: s["value"] for s in (r.get("stats") or [])}
-                rc = stat_map.get("row_count") or stat_map.get("rows_affected") or stat_map.get("num_rows") or stat_map.get("num_rows_updated") or stat_map.get("num_rows_inserted")
-                if rc is not None:
-                    try:
-                        row_counts.append((completed or "", int(float(rc))))
-                    except (ValueError, TypeError):
-                        pass
-
-            row_counts.sort(key=lambda x: x[0])
-            earliest = row_counts[0][1] if row_counts else None
-            latest = row_counts[-1][1] if row_counts else None
-            delta = (latest - earliest) if (latest is not None and earliest is not None) else None
-            total_runs = len(times)
-            avg_new = (delta / total_runs) if (delta is not None and total_runs > 0) else None
-
-            batch_results[uid] = {
-                "times": times,
-                "earliest_rows": earliest,
-                "latest_rows": latest,
-                "row_delta": delta,
-                "avg_new_rows": round(avg_new, 1) if avg_new is not None else None,
+    if uncached:
+        print(f"[{client.name}] {len(run_models)}/{len(env_runs)} runs cached, fetching {len(uncached)} from API...")
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {
+                executor.submit(
+                    _fetch_single_run_models_with_stats, client, r["job_definition_id"], r["id"]
+                ): r["id"]
+                for r in uncached
             }
-        return batch_results
+            done = 0
+            for future in as_completed(futures):
+                rid, models = future.result()
+                done += 1
+                if models is not None:
+                    run_models[rid] = models
+                if done % 20 == 0 or done == len(uncached):
+                    print(f"  Fetched {done}/{len(uncached)} runs...")
+    else:
+        print(f"[{client.name}] All {len(env_runs)} runs served from cache")
 
-    done_count = 0
-    with ThreadPoolExecutor(max_workers=4) as executor:
-        futures = {executor.submit(_fetch_batch, batch): batch for batch in batches}
-        for future in as_completed(futures):
-            try:
-                batch_results = future.result()
-                results.update(batch_results)
-            except Exception as e:
-                print(f"  Batch error: {e}")
-            done_count += len(futures[future])
-            if done_count < len(uids):
-                print(f"  Fetched run stats {done_count}/{len(uids)} models...")
+    # Aggregate per-model stats
+    model_times = defaultdict(list)
+    model_rows = defaultdict(list)
+
+    for r in env_runs:
+        rid = r["id"]
+        models = run_models.get(rid)
+        if not models:
+            continue
+        run_ts = r.get("created_at", "")
+        for m in models:
+            uid = m.get("uniqueId")
+            if uid not in uid_set:
+                continue
+            if m.get("status") != "success":
+                continue
+            et = m.get("executionTime")
+            if et and et > 0:
+                model_times[uid].append(et)
+            stat_map = {s["id"]: s["value"] for s in (m.get("stats") or [])}
+            rc = stat_map.get("row_count") or stat_map.get("rows_affected") or stat_map.get("num_rows") or stat_map.get("num_rows_updated") or stat_map.get("num_rows_inserted")
+            if rc is not None:
+                try:
+                    model_rows[uid].append((run_ts, int(float(rc))))
+                except (ValueError, TypeError):
+                    pass
+
+    results = {}
+    for uid in model_uids:
+        times = model_times.get(uid, [])
+        rows = sorted(model_rows.get(uid, []), key=lambda x: x[0])
+        earliest = rows[0][1] if rows else None
+        latest = rows[-1][1] if rows else None
+        delta = (latest - earliest) if (latest is not None and earliest is not None) else None
+        total_runs = len(times)
+        avg_new = (delta / total_runs) if (delta is not None and total_runs > 0) else None
+        results[uid] = {
+            "times": times,
+            "earliest_rows": earliest,
+            "latest_rows": latest,
+            "row_delta": delta,
+            "avg_new_rows": round(avg_new, 1) if avg_new is not None else None,
+        }
 
     db_set(f"api:{key}", results)
-    print(f"[{client.name}] Fetched run stats for {len(results)} models")
+    print(f"[{client.name}] Aggregated run stats for {sum(1 for v in results.values() if v['times'])} models with runs ({len(env_runs)} runs processed)")
     return results
 
 
