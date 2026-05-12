@@ -12,6 +12,11 @@ import os
 import threading
 import time
 
+# Bump this version whenever the app's data schema changes.
+# On startup, if the stored version differs, all cached data is cleared
+# so users get a clean re-fetch instead of serving stale/incompatible data.
+CACHE_SCHEMA_VERSION = "3"
+
 DB_PATH = os.path.join(os.path.dirname(__file__), ".cache", "health_check_cache.duckdb")
 _lock = threading.Lock()
 _conn = None
@@ -37,11 +42,34 @@ def _get_conn():
                 )
                 """
             )
+            _check_schema_version()
         except Exception as e:
             print(f"Warning: DuckDB unavailable ({e}), using in-memory cache only")
             _fallback = True
             return None
     return _conn
+
+
+def _check_schema_version():
+    """Clear all cached data if the schema version has changed."""
+    try:
+        row = _conn.execute(
+            "SELECT data FROM kv_cache WHERE key = '_schema_version'"
+        ).fetchone()
+        stored = row[0] if row else None
+        if stored == CACHE_SCHEMA_VERSION:
+            return
+        if stored is not None:
+            print(f"  Cache schema changed (v{stored} -> v{CACHE_SCHEMA_VERSION}), clearing stale data...")
+        else:
+            print(f"  Initializing cache (schema v{CACHE_SCHEMA_VERSION})...")
+        _conn.execute("DELETE FROM kv_cache")
+        _conn.execute(
+            "INSERT OR REPLACE INTO kv_cache (key, data, ts) VALUES (?, ?, ?)",
+            ["_schema_version", CACHE_SCHEMA_VERSION, time.time()],
+        )
+    except Exception:
+        pass
 
 
 def cache_get(key, ttl=None):
@@ -121,6 +149,35 @@ def cache_delete(key):
 
 
 def cache_clear():
+    with _lock:
+        _mem_cache.clear()
+        conn = _get_conn()
+        if conn is None:
+            return
+        try:
+            conn.execute("DELETE FROM kv_cache")
+        except Exception:
+            pass
+
+
+def cache_get_timestamp(key):
+    """Return epoch timestamp when key was last set, or None."""
+    with _lock:
+        conn = _get_conn()
+        if conn is None:
+            entry = _mem_cache.get(key)
+            return entry[1] if entry else None
+        try:
+            row = conn.execute(
+                "SELECT ts FROM kv_cache WHERE key = ?", [key]
+            ).fetchone()
+            return row[0] if row else None
+        except Exception:
+            return None
+
+
+def cache_clear_for_update():
+    """Clear all caches, prune entries older than 30 days."""
     with _lock:
         _mem_cache.clear()
         conn = _get_conn()

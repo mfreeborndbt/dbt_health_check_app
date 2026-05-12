@@ -17,7 +17,7 @@ def _cache_key(prefix, *args):
 
 def is_dead_models_cached(client):
     key = _cache_key("dm_summary_v1", client.account_id, client.environment_id)
-    return db_get(f"api:{key}", ttl=_API_TTL) is not None
+    return db_get(f"api:{key}") is not None
 
 
 def invalidate_dead_models_cache(client):
@@ -40,7 +40,7 @@ def fetch_dead_models(client: DbtClient):
     testing, documentation rules) minus high-impact info.
     """
     summary_key = _cache_key("dm_summary_v1", client.account_id, client.environment_id)
-    cached = db_get(f"api:{summary_key}", ttl=_API_TTL)
+    cached = db_get(f"api:{summary_key}")
     if cached is not None:
         print(f"[{client.name}] Serving dead models from cache")
         return cached

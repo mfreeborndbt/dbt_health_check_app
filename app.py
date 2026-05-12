@@ -4,6 +4,7 @@ import queue
 import shutil
 import sys
 import threading
+import time as _time
 from flask import Flask, render_template, request, redirect, url_for, flash, Response
 from discovery_client import load_credentials, save_credentials, DbtClient, get_client_from_config, CREDENTIALS_PATH
 from data_quality import fetch_data_quality_summary, is_summary_cached
@@ -88,14 +89,6 @@ def _preload_incremental_candidates():
     fetch_incremental_candidates(client)
 
 
-def _preload_macro_usage():
-    creds = load_credentials()
-    if creds is None:
-        raise Exception("Not configured")
-    client = get_client_from_config()
-    from macro_usage import fetch_macro_usage
-    fetch_macro_usage(client)
-
 
 def _invalidate_summary():
     """Clear the summary cache so config changes take effect."""
@@ -109,6 +102,39 @@ def _invalidate_summary():
         with _SUMMARY_CACHE_LOCK:
             _SUMMARY_CACHE.pop(key, None)
         invalidate_project_health_summary(client)
+
+
+def _get_last_updated(page="/observability"):
+    """Return human-readable cache age string, or None if not cached."""
+    client = get_client_from_config()
+    if not client:
+        return None
+    from data_quality import _summary_db_key
+    from project_health import _cache_key as ph_ck
+    from dead_models import _cache_key as dm_ck
+    from incremental_candidates import _cache_key as ic_ck
+    key_map = {
+        "/observability": _summary_db_key(client),
+        "/best-practices": f"api:{ph_ck('ph_summary_v9', client.account_id, client.environment_id)}",
+        "/dead-models": f"api:{dm_ck('dm_summary_v1', client.account_id, client.environment_id)}",
+        "/incremental-candidates": f"api:{ic_ck('ic_summary_v2', client.account_id, client.environment_id)}",
+    }
+    key = key_map.get(page)
+    if not key:
+        return None
+    ts = cache_db.cache_get_timestamp(key)
+    if ts is None:
+        return None
+    age = _time.time() - ts
+    if age < 60:
+        return "just now"
+    if age < 3600:
+        return f"{int(age // 60)}m ago"
+    if age < 86400:
+        h = int(age // 3600)
+        m = int((age % 3600) // 60)
+        return f"{h}h {m}m ago" if m else f"{h}h ago"
+    return f"{int(age // 86400)}d ago"
 
 
 # ---------------------------------------------------------------------------
@@ -199,6 +225,22 @@ def setup_clear():
     return redirect(url_for("setup"))
 
 
+@app.route("/refresh")
+def refresh():
+    """Clear all caches and re-fetch fresh data via the loading page."""
+    next_page = request.args.get("next", "/observability")
+    # Clear in-memory caches
+    from data_quality import _SUMMARY_CACHE, _SUMMARY_CACHE_LOCK
+    with _SUMMARY_CACHE_LOCK:
+        _SUMMARY_CACHE.clear()
+    from incremental_candidates import _DETAIL_CACHE, _CACHE_LOCK
+    with _CACHE_LOCK:
+        _DETAIL_CACHE.clear()
+    # Clear DuckDB cache
+    cache_db.cache_clear_for_update()
+    return redirect(url_for("loading", next=next_page))
+
+
 # ---------------------------------------------------------------------------
 # High Impact Config
 # ---------------------------------------------------------------------------
@@ -275,9 +317,6 @@ def _needs_loading(page="/observability"):
     if page == "/incremental-candidates":
         from incremental_candidates import is_incremental_candidates_cached
         return not is_incremental_candidates_cached(client)
-    if page == "/macro-usage":
-        from macro_usage import is_macro_usage_cached
-        return not is_macro_usage_cached(client)
     return not is_summary_cached(client)
 
 
@@ -291,7 +330,6 @@ def loading():
         "/best-practices": "Best Practice Checks",
         "/dead-models": "Dead Models",
         "/incremental-candidates": "Incremental Candidates",
-        "/macro-usage": "Macro Usage",
     }
     page_name = page_names.get(next_page, next_page)
     return render_template("loading.html", next_page=next_page, page_name=page_name, project_name=project_name)
@@ -315,8 +353,6 @@ def api_load():
                     _preload_dead_models()
                 elif page == "/incremental-candidates":
                     _preload_incremental_candidates()
-                elif page == "/macro-usage":
-                    _preload_macro_usage()
                 else:
                     _preload_observability()
             except Exception as e:
@@ -380,6 +416,7 @@ def observability():
         "observability.html",
         creds=creds,
         summary=summary,
+        last_updated=_get_last_updated("/observability"),
     )
 
 
@@ -403,7 +440,7 @@ def best_practices():
             return redirect(url_for("setup"))
         flash(f"Error fetching project health: {e}", "error")
         return redirect(url_for("observability"))
-    return render_template("best_practices.html", creds=creds, summary=summary)
+    return render_template("best_practices.html", creds=creds, summary=summary, last_updated=_get_last_updated("/best-practices"))
 
 
 @app.route("/dead-models")
@@ -426,7 +463,7 @@ def dead_models():
             return redirect(url_for("setup"))
         flash(f"Error fetching dead models: {e}", "error")
         return redirect(url_for("observability"))
-    return render_template("dead_models.html", creds=creds, summary=summary)
+    return render_template("dead_models.html", creds=creds, summary=summary, last_updated=_get_last_updated("/dead-models"))
 
 
 @app.route("/incremental-candidates")
@@ -449,30 +486,8 @@ def incremental_candidates():
             return redirect(url_for("setup"))
         flash(f"Error fetching incremental candidates: {e}", "error")
         return redirect(url_for("observability"))
-    return render_template("incremental_candidates.html", creds=creds, summary=summary)
+    return render_template("incremental_candidates.html", creds=creds, summary=summary, last_updated=_get_last_updated("/incremental-candidates"))
 
-
-@app.route("/macro-usage")
-def macro_usage():
-    creds = load_credentials()
-    if creds is None:
-        return redirect(url_for("setup"))
-
-    if _needs_loading("/macro-usage"):
-        return redirect(url_for("loading", next="/macro-usage"))
-
-    client = get_client_from_config()
-    try:
-        from macro_usage import fetch_macro_usage
-        summary = fetch_macro_usage(client)
-    except Exception as e:
-        err = str(e)
-        if any(s in err for s in ("401", "403", "Unauthorized", "Forbidden")):
-            flash("API authentication failed.", "error")
-            return redirect(url_for("setup"))
-        flash(f"Error fetching macro usage: {e}", "error")
-        return redirect(url_for("observability"))
-    return render_template("macro_usage.html", creds=creds, summary=summary)
 
 
 if __name__ == "__main__":

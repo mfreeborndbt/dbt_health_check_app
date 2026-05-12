@@ -9,13 +9,13 @@ Local dashboard that connects to **dbt Cloud** (Discovery + Admin APIs) and summ
 ### macOS / Linux
 
 ```bash
-git clone https://github.com/mfreeborndbt/dbt_health_check_app.git && cd dbt_health_check_app && python3 run.py
+git clone https://github.com/mfreeborndbt/dbt_health_check_app.git 2>/dev/null; cd dbt_health_check_app && python3 run.py
 ```
 
 ### Windows
 
 ```powershell
-git clone https://github.com/mfreeborndbt/dbt_health_check_app.git; cd dbt_health_check_app; python run.py
+git clone https://github.com/mfreeborndbt/dbt_health_check_app.git 2>$null; cd dbt_health_check_app; python run.py
 ```
 
 **That's it.** The launcher handles everything automatically:
@@ -27,6 +27,8 @@ git clone https://github.com/mfreeborndbt/dbt_health_check_app.git; cd dbt_healt
 - Opens your browser
 
 Already cloned? Just run `python3 run.py` again — it always works.
+
+Results are cached locally in DuckDB and persist across restarts. On return visits, the app loads instantly from cache. Click **Update** in the nav bar to refresh with the latest data from your dbt platform account.
 
 | Option | Example |
 |--------|---------|

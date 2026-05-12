@@ -29,7 +29,7 @@ def _cache_key(prefix, *args):
 
 def is_incremental_candidates_cached(client):
     key = _cache_key("ic_summary_v2", client.account_id, client.environment_id)
-    return db_get(f"api:{key}", ttl=_API_TTL) is not None
+    return db_get(f"api:{key}") is not None
 
 
 def invalidate_incremental_candidates_cache(client):
@@ -218,7 +218,7 @@ def _fetch_model_details(client: DbtClient):
 
 def fetch_incremental_candidates(client: DbtClient):
     summary_key = _cache_key("ic_summary_v2", client.account_id, client.environment_id)
-    cached = db_get(f"api:{summary_key}", ttl=_API_TTL)
+    cached = db_get(f"api:{summary_key}")
     if cached is not None:
         print(f"[{client.name}] Serving incremental candidates from cache")
         return cached
