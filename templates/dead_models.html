@@ -15,6 +15,7 @@
     .tab:hover { color:var(--text);text-decoration:none; } .tab.active { color:var(--accent);border-bottom-color:var(--accent);font-weight:600; }
     .tab-spacer { flex:1; } .tab-sep { width:1px;height:1.1rem;background:var(--border);margin:0 0.25rem;align-self:center; }
     .tab-link { padding:0.6rem 0.75rem;font-size:0.78rem;color:var(--text-muted);text-decoration:none; } .tab-link:hover { color:var(--accent);text-decoration:none; }
+    .cache-age { font-size:0.7rem;color:var(--text-muted);padding:0 0.25rem;align-self:center; } .update-link { color:var(--accent) !important;font-weight:600; }
     header h1 { font-size:1.5rem;font-weight:600; } header h1 span { color:var(--accent); }
     .subtitle { color:var(--text-muted);font-size:0.85rem;margin-top:0.25rem; }
     .summary-grid { display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;margin:1.5rem 0; }
@@ -58,12 +59,14 @@
     <a href="/best-practices" class="tab">Best Practice Checks</a>
     <a href="/dead-models" class="tab active">Dead Models</a>
     <a href="/incremental-candidates" class="tab">Incremental Candidates</a>
-    <a href="/macro-usage" class="tab">Macro Usage</a>
     <span class="tab-spacer"></span>
     <span class="tab-sep"></span>
     <a href="/config" class="tab-link">High Impact Config</a>
     <span class="tab-sep"></span>
     <a href="/setup" class="tab-link">&#9881; Settings</a>
+    <span class="tab-sep"></span>
+    {% if last_updated %}<span class="cache-age">{{ last_updated }}</span>{% endif %}
+    <a href="/refresh?next=/dead-models" class="tab-link update-link">&#8635; Update</a>
   </nav>
   <header>
     <h1><span>&#9642;</span> Dead Models</h1>

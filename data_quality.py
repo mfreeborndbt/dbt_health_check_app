@@ -25,9 +25,9 @@ def _summary_cache_get(client):
     key = _summary_db_key(client)
     with _SUMMARY_CACHE_LOCK:
         entry = _SUMMARY_CACHE.get(key)
-        if entry and (time.time() - entry[0]) < _AGG_TTL:
+        if entry:
             return entry[1]
-    data = db_get(key, ttl=_AGG_TTL)
+    data = db_get(key)
     if data is not None:
         with _SUMMARY_CACHE_LOCK:
             _SUMMARY_CACHE[key] = (time.time(), data)
@@ -46,9 +46,9 @@ def is_summary_cached(client):
     key = _summary_db_key(client)
     with _SUMMARY_CACHE_LOCK:
         entry = _SUMMARY_CACHE.get(key)
-        if entry and (time.time() - entry[0]) < _AGG_TTL:
+        if entry:
             return True
-    return db_exists(key, ttl=_AGG_TTL)
+    return db_exists(key)
 
 
 # ---------------------------------------------------------------------------

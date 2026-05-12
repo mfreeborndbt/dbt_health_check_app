@@ -20,7 +20,7 @@ def invalidate_project_health_summary(client):
 def is_project_health_cached(client):
     """Check if project health data is cached."""
     key = _cache_key("ph_summary_v9", client.account_id, client.environment_id)
-    return db_get(f"api:{key}", ttl=_API_TTL) is not None
+    return db_get(f"api:{key}") is not None
 
 
 def _cache_key(prefix, *args):
@@ -581,7 +581,7 @@ def _evaluate_governance_rules(model):
 def fetch_project_health(client: DbtClient):
     """Build the project health summary."""
     key = _cache_key("ph_summary_v9", client.account_id, client.environment_id)
-    cached = db_get(f"api:{key}", ttl=_API_TTL)
+    cached = db_get(f"api:{key}")
     if cached is not None:
         print(f"[{client.name}] Serving project health from cache")
         return cached
