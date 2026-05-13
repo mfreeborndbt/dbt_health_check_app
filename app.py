@@ -1,6 +1,7 @@
 import json
 import os
 import queue
+import secrets
 import shutil
 import sys
 import threading
@@ -11,7 +12,7 @@ from data_quality import fetch_data_quality_summary, is_summary_cached
 import cache_db
 
 app = Flask(__name__)
-app.secret_key = "dbt-health-check-key"
+app.secret_key = os.environ.get("FLASK_SECRET_KEY") or secrets.token_hex(32)
 
 
 def _fmt_time(seconds):
@@ -213,7 +214,7 @@ def setup_save():
         return redirect(url_for("setup"))
 
 
-@app.route("/setup/clear")
+@app.route("/setup/clear", methods=["POST"])
 def setup_clear():
     if os.path.exists(CREDENTIALS_PATH):
         os.remove(CREDENTIALS_PATH)
