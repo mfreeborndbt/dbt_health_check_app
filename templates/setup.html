@@ -156,7 +156,9 @@
         <div class="actions">
           <button type="submit" class="btn">Save & Test Connection</button>
           {% if creds %}
-          <a href="/setup/clear" class="btn btn-danger" onclick="return confirm('Clear all credentials?')">Clear Credentials</a>
+          <form method="post" action="/setup/clear" style="display:inline" onsubmit="return confirm('Clear all credentials?')">
+            <button type="submit" class="btn btn-danger">Clear Credentials</button>
+          </form>
           {% endif %}
         </div>
       </form>
