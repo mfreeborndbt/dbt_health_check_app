@@ -1,5 +1,7 @@
 import json
 import os
+import random
+import threading
 import time
 import requests
 
@@ -7,7 +9,8 @@ import requests
 class DbtClient:
     """Client for querying dbt Cloud Discovery + Admin APIs."""
 
-    MAX_RETRIES = 3
+    MAX_RETRIES = 5
+    MAX_CONCURRENT_REQUESTS = 10
 
     def __init__(self, config):
         self.discovery_url = config["discovery_url"]
@@ -24,15 +27,23 @@ class DbtClient:
         self.admin_headers = {
             "Authorization": f"Bearer {self.token}",
         }
+        self._semaphore = threading.Semaphore(self.MAX_CONCURRENT_REQUESTS)
 
     def _retry_request(self, request_fn):
         """Execute a request with retry on 429 rate limits and 502/503 transient errors."""
         for attempt in range(self.MAX_RETRIES):
-            resp = request_fn()
+            with self._semaphore:
+                resp = request_fn()
             if resp.status_code in (429, 502, 503):
-                wait = 2 ** attempt
-                print(f"  Transient error ({resp.status_code}), retrying in {wait}s...")
-                time.sleep(wait)
+                retry_after = resp.headers.get("Retry-After")
+                if retry_after:
+                    wait = float(retry_after)
+                else:
+                    wait = 2 ** attempt
+                jitter = random.uniform(0, wait * 0.25)
+                total_wait = wait + jitter
+                print(f"  Transient error ({resp.status_code}), retrying in {total_wait:.1f}s...")
+                time.sleep(total_wait)
                 continue
             return resp
         return resp
